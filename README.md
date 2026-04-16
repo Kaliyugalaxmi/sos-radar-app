@@ -1,50 +1,49 @@
-# Welcome to your Expo app 👋
+# 🔴 SOS Radar Safety App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+SOS Radar Safety App is a real-time women safety and emergency response mobile application built using **React Native (Expo)** and **Firebase**. It is designed to enable fast, reliable communication during emergencies through a trusted and closed safety network.
 
-## Get started
+---
 
-1. Install dependencies
+## 📱 Overview
 
-   ```bash
-   npm install
-   ```
+The app allows users to build a trusted network using a **friend request system (device ID-based, upgradeable to authentication)**.
 
-2. Start the app
+When an SOS is triggered, the system sends alerts **in parallel** to:
+- 📞 Selected emergency contacts from the phonebook  
+- 📡 Nearby trusted friends using a radar-based geolocation system  
 
-   ```bash
-   npx expo start
-   ```
+If a nearby trusted friend responds with “I’m coming”, both users are connected through **real-time mutual location tracking** until the situation is resolved.
 
-In the output, you'll find options to open the app in a
+This ensures help is always reachable through both **local proximity support and emergency contact backup**, improving response time in critical situations.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 🚨 Key Features
 
-## Get a fresh project
+- 🔴 One-tap SOS emergency alert system  
+- 👥 Trusted network via friend requests (device ID-based, upgradeable to authentication)  
+- 📍 Real-time geolocation tracking and sharing  
+- 📡 Radar-based proximity detection of nearby trusted friends  
+- 📢 Parallel alert system (phonebook contacts + nearby trusted users)  
+- 🤝 “I’m coming” response system for helpers  
+- 🧭 Live mutual location tracking until assistance arrives  
+- 🔥 Firebase real-time database for instant updates  
+- 🔐 Secure, closed-network safety system (no unknown users)
 
-When you're ready, run:
+---
 
-```bash
-npm run reset-project
-```
+## 🎯 Purpose
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+To create a fast, intelligent, and reliable emergency response system that prioritizes trusted contacts and nearby connections, ensuring immediate assistance during critical situations.
 
-## Learn more
+---
 
-To learn more about developing your project with Expo, look at the following resources:
+## 🔄 How It Works
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+1. User triggers SOS via app  
+2. Alert is sent simultaneously to:
+   - Emergency contacts (phonebook)
+   - Nearby trusted friends (radar system)  
+3. If a user accepts (“I’m coming”)  
+4. Both users enter live location sharing mode  
+5. Continuous tracking continues until safety is restored  
