@@ -1,23 +1,60 @@
 // app/_layout.tsx
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { onValue, ref, get } from 'firebase/database';
+import { get, onValue, ref } from 'firebase/database';
 import { useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { rtdb } from '../config/firebase';
 import { getOrCreateDeviceId } from '../services/deviceId';
+import { acceptHelp, updateHelperLocation } from '../services/emergency';
 import { getOrCreateProfile, updatePushToken } from '../services/friends';
+import { getCurrentLocation, watchLocation } from '../services/location';
 import { getExpoPushToken } from '../services/notifications';
 import { useAppStore } from '../store/useAppStore';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { setDeviceId, setNickname, setFriends, setPendingRequests, setOutgoingRequests, loadContactsFromStorage, setInitialized } = useAppStore();
+  const {
+    setDeviceId, setNickname, setFriends, setPendingRequests,
+    setOutgoingRequests, loadContactsFromStorage, setInitialized,
+    setHelpingState, helpingState, nickname,
+  } = useAppStore();
   const router = useRouter();
+
+  // Helper location tracking — cleanup ref
+  const stopHelperTracking = useRef<(() => void) | null>(null);
+
+  // Jab helpingState set ho, apni location track karke Firebase mein bhejte raho
+  useEffect(() => {
+    if (!helpingState) {
+      // Stop karo
+      stopHelperTracking.current?.();
+      stopHelperTracking.current = null;
+      return;
+    }
+
+    const { sessionId, friendDeviceId } = helpingState;
+    const myDeviceId = useAppStore.getState().deviceId;
+    if (!myDeviceId) return;
+
+    // Turant current location bhejo
+    getCurrentLocation().then((coords) => {
+      if (coords) updateHelperLocation(sessionId, myDeviceId, coords);
+    });
+
+    // Phir har 5 seconds update karo
+    stopHelperTracking.current = watchLocation(async (coords) => {
+      await updateHelperLocation(sessionId, myDeviceId, coords);
+    });
+
+    return () => {
+      stopHelperTracking.current?.();
+      stopHelperTracking.current = null;
+    };
+  }, [helpingState]);
 
   useEffect(() => {
     initializeApp();
@@ -25,21 +62,17 @@ export default function RootLayout() {
 
   async function initializeApp() {
     try {
-      // Step 1: Device ID get karo (signup nahi, device-based)
       const deviceId = await getOrCreateDeviceId();
       setDeviceId(deviceId);
 
-      // Step 2: Contacts load karo AsyncStorage se
       await loadContactsFromStorage();
 
-      // Step 3: Firebase profile sync (optional, friends feature ke liye)
       try {
         const profile = await getOrCreateProfile(deviceId);
         setNickname(profile.nickname ?? '');
         setPendingRequests(profile.pendingRequests ?? []);
         setOutgoingRequests((profile as any).outgoingRequests ?? []);
 
-        // Helper to resolve friend IDs into friend objects with nickname
         async function resolveFriends(friendIds: any): Promise<any[]> {
           const ids: string[] = Array.isArray(friendIds) ? friendIds : [];
           const results = await Promise.all(
@@ -59,91 +92,124 @@ export default function RootLayout() {
         const resolved = await resolveFriends(profile.friends ?? []);
         setFriends(resolved);
 
-        // Subscribe to realtime profile updates so UI reflects accepts/rejections
+        // Realtime profile subscribe — friend requests + SOS alerts
         const lastSOSSeenTs = { value: 0 };
         const profileRef = ref(rtdb, `users/${deviceId}`);
-        const unsubscribe = onValue(profileRef, async (snap) => {
-          if (snap.exists()) {
-            const p: any = snap.val();
-            setNickname(p.nickname ?? '');
-            setPendingRequests(p.pendingRequests ?? []);
-            setOutgoingRequests(p.outgoingRequests ?? []);
-            const resolvedLive = await resolveFriends(p.friends ?? []);
-            setFriends(resolvedLive);
+        onValue(profileRef, async (snap) => {
+          if (!snap.exists()) return;
+          const p: any = snap.val();
+          setNickname(p.nickname ?? '');
+          setPendingRequests(p.pendingRequests ?? []);
+          setOutgoingRequests(p.outgoingRequests ?? []);
+          const resolvedLive = await resolveFriends(p.friends ?? []);
+          setFriends(resolvedLive);
 
-            // In-app alert handling: if a friend wrote lastSOSAlert, show an Alert to the user
-            try {
-              const alert = p.lastSOSAlert;
-              if (alert && alert.timestamp && alert.timestamp > lastSOSSeenTs.value) {
-                lastSOSSeenTs.value = alert.timestamp;
-                const from = alert.fromDeviceId ?? 'Friend';
-                const addr = alert.address ?? '';
-                Alert.alert(
-                  'SOS Nearby',
-                  `${from} started an SOS. ${addr ? '\n' + addr : ''}`,
-                  [{ text: 'Open Radar', onPress: () => {} }, { text: 'Dismiss', style: 'cancel' }]
-                );
-              }
-            } catch (err) {
-              // ignore alert errors
+          // ── SOS Alert Handler ─────────────────────────────────────────────
+          try {
+            const sosAlert = p.lastSOSAlert;
+            if (sosAlert && sosAlert.timestamp && sosAlert.timestamp > lastSOSSeenTs.value) {
+              lastSOSSeenTs.value = sosAlert.timestamp;
+
+              const fromId: string = sosAlert.fromDeviceId ?? 'Ek dost';
+              const addr: string = sosAlert.address ?? '';
+              const sessionId: string = sosAlert.sessionId;
+
+              // Nickname fetch karo
+              let fromNick = fromId;
+              try {
+                const friendSnap = await get(ref(rtdb, `users/${fromId}`));
+                if (friendSnap.exists()) fromNick = friendSnap.val().nickname ?? fromId;
+              } catch {}
+
+              const myNick = useAppStore.getState().nickname || deviceId.slice(0, 8);
+
+              Alert.alert(
+                '🚨 Dost Ko Madad Chahiye!',
+                `${fromNick} ne SOS trigger kiya hai!\n${addr ? `📍 ${addr}` : ''}\n\nKya tum madad karne jaoge?`,
+                [
+                  {
+                    text: '✅ Haan, jaa raha hoon!',
+                    onPress: async () => {
+                      try {
+                        // Firebase mein register karo ki mai aa raha hoon
+                        await acceptHelp(sessionId, deviceId, myNick);
+                        // Store mein helping state set karo (yeh location tracking trigger karega)
+                        setHelpingState({
+                          sessionId,
+                          friendDeviceId: fromId,
+                          friendNickname: fromNick,
+                          friendAddress: addr,
+                        });
+                        // Radar screen par navigate karo SOS person ki location dekhne
+                        router.push(`/(tabs)/radar?helpingSessionId=${encodeURIComponent(sessionId)}&friendNickname=${encodeURIComponent(fromNick)}`);
+                        Alert.alert(
+                          '✅ Help Mode Active',
+                          `Tum ${fromNick} ki madad kar rahe ho. Unhe tumhari live location dikh rahi hai.`
+                        );
+                      } catch (err) {
+                        Alert.alert('Error', 'Help accept karne mein dikkat aayi.');
+                      }
+                    },
+                  },
+                  {
+                    text: '❌ Abhi nahi ja sakta',
+                    style: 'cancel',
+                  },
+                ]
+              );
             }
+          } catch (err) {
+            console.warn('SOS alert handling error', err);
           }
         });
-        // keep listener until app unmount (no cleanup here since root lives whole app lifecycle)
 
-        // Register for push notifications and save token to profile
         try {
           const pushToken = await getExpoPushToken();
-          if (pushToken) {
-            await updatePushToken(deviceId, pushToken);
-          }
+          if (pushToken) await updatePushToken(deviceId, pushToken);
         } catch (err) {
           console.warn('push register failed', err);
         }
       } catch (e) {
-        // Firebase offline ho toh bhi app kaam kare
         console.warn('Firebase profile sync failed - offline mode', e);
       }
 
       setInitialized(true);
     } catch (error) {
       console.error('App init error:', error);
-      setInitialized(true); // Error hone par bhi app open ho
+      setInitialized(true);
     } finally {
       await SplashScreen.hideAsync();
     }
   }
 
-  // Notification response handler: when user taps a push, open Radar to session
+  // Push notification response handler
   useEffect(() => {
     let subscription: any = null;
     (async () => {
       try {
         const Constants = await import('expo-constants');
-        if (Constants?.default?.appOwnership === 'expo') return; // skip in Expo Go
+        if (Constants?.default?.appOwnership === 'expo') return;
 
         const Notifications = await import('expo-notifications');
         subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
           try {
-            const data = response?.notification?.request?.content?.data ?? response?.notification?.request?.content?.data;
-            const sessionId = data?.sessionId ?? data?.session_id ?? null;
+            const data = response?.notification?.request?.content?.data ?? {};
+            const sessionId = data?.sessionId ?? null;
             if (sessionId) {
-              router.push(`/(tabs)/radar?sessionId=${encodeURIComponent(sessionId)}`);
+              router.push(`/(tabs)/radar?helpingSessionId=${encodeURIComponent(sessionId)}`);
             } else {
               router.push('/(tabs)/radar');
             }
           } catch (e) {
-            console.warn('notification response handling error', e);
+            console.warn('notification response error', e);
           }
         });
-      } catch (e) {
-        // ignore - likely Expo Go or notifications not available
-      }
+      } catch (e) {}
     })();
 
     return () => {
       try {
-        if (subscription && subscription.remove) subscription.remove();
+        if (subscription?.remove) subscription.remove();
       } catch {}
     };
   }, [router]);

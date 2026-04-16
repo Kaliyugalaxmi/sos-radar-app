@@ -15,6 +15,14 @@ export interface Friend {
   lastLocation?: { latitude: number; longitude: number };
 }
 
+// Jab main kisi dost ki madad kar raha hoon
+export interface HelpingState {
+  sessionId: string;
+  friendDeviceId: string;
+  friendNickname: string;
+  friendAddress: string;
+}
+
 interface AppState {
   // Device Identity
   deviceId: string | null;
@@ -23,7 +31,7 @@ interface AppState {
   // Contacts (SMS ke liye)
   contacts: Contact[];
 
-  // Emergency State
+  // Emergency State (mera apna SOS)
   isSOSActive: boolean;
   activeSessionId: string | null;
 
@@ -31,6 +39,9 @@ interface AppState {
   friends: Friend[];
   pendingRequests: string[];
   outgoingRequests: string[];
+
+  // Helper state: kisi dost ki madad kar raha hoon
+  helpingState: HelpingState | null;
 
   // App initialized?
   isInitialized: boolean;
@@ -45,6 +56,7 @@ interface AppState {
   setFriends: (friends: Friend[]) => void;
   setPendingRequests: (requests: string[]) => void;
   setOutgoingRequests: (requests: string[]) => void;
+  setHelpingState: (state: HelpingState | null) => void;
   setInitialized: (val: boolean) => void;
   loadContactsFromStorage: () => Promise<void>;
   saveContactsToStorage: (contacts: Contact[]) => Promise<void>;
@@ -61,10 +73,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   friends: [],
   pendingRequests: [],
   outgoingRequests: [],
+  helpingState: null,
   isInitialized: false,
 
   setDeviceId: (id) => set({ deviceId: id }),
-
   setNickname: (name) => set({ nickname: name }),
 
   addContact: async (contact) => {
@@ -91,10 +103,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isSOSActive: active, activeSessionId: sessionId ?? null }),
 
   setFriends: (friends) => set({ friends }),
-
   setPendingRequests: (requests) => set({ pendingRequests: requests }),
   setOutgoingRequests: (requests) => set({ outgoingRequests: requests }),
-
+  setHelpingState: (state) => set({ helpingState: state }),
   setInitialized: (val) => set({ isInitialized: val }),
 
   loadContactsFromStorage: async () => {

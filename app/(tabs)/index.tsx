@@ -1,5 +1,5 @@
 // app/(tabs)/index.tsx
-// Main SOS Screen - Yahan SOS button press hota hai
+// Main SOS Screen
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,7 +14,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from "react-native-safe-area-context";
-import { createEmergencySession, resolveEmergencySession, updateLiveLocation } from '../../services/emergency';
+import {
+  createEmergencySession,
+  HelperInfo,
+  resolveEmergencySession,
+  subscribeHelperLocations,
+  updateLiveLocation,
+} from '../../services/emergency';
 import { Coordinates, getAddressFromCoords, getCurrentLocation, watchLocation } from '../../services/location';
 import { sendEmergencySMS } from '../../services/sms';
 import { useAppStore } from '../../store/useAppStore';
@@ -26,12 +32,13 @@ export default function SOSScreen() {
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
   const [address, setAddress] = useState('Fetching location...');
   const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  // Helpers jo aa rahe hain
+  const [helpers, setHelpers] = useState<HelperInfo[]>([]);
 
-  // Animation refs
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const sosButtonScale = useRef(new Animated.Value(1)).current;
   const countdownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopWatchingLocation = useRef<(() => void) | null>(null);
+  const stopWatchingHelpers = useRef<(() => void) | null>(null);
 
   // Pulse animation jab SOS active ho
   useEffect(() => {
@@ -46,6 +53,22 @@ export default function SOSScreen() {
       pulseAnim.setValue(1);
     }
   }, [isSOSActive]);
+
+  // Helper locations subscribe karo jab SOS active ho
+  useEffect(() => {
+    if (isSOSActive && activeSessionId) {
+      stopWatchingHelpers.current = subscribeHelperLocations(activeSessionId, (h) => {
+        setHelpers(h);
+      });
+    } else {
+      stopWatchingHelpers.current?.();
+      stopWatchingHelpers.current = null;
+      setHelpers([]);
+    }
+    return () => {
+      stopWatchingHelpers.current?.();
+    };
+  }, [isSOSActive, activeSessionId]);
 
   // Location fetch on mount
   useEffect(() => {
@@ -68,10 +91,8 @@ export default function SOSScreen() {
     setIsFetchingLocation(false);
   }
 
-  // SOS button press - 3 second countdown ke baad activate
   function handleSOSPress() {
     if (isSOSActive) {
-      // SOS already active hai - cancel karna hai?
       Alert.alert(
         'Cancel SOS?',
         'Do you want to stop the SOS alert?',
@@ -86,7 +107,7 @@ export default function SOSScreen() {
     if (contacts.length === 0) {
       Alert.alert(
         'No Contacts',
-        'Please add emergency contacts first. At least one contact is required for SOS.',
+        'Please add emergency contacts first.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Add Contacts', onPress: () => router.push('/(tabs)/sos') },
@@ -95,7 +116,6 @@ export default function SOSScreen() {
       return;
     }
 
-    // 3 second countdown shuru karo
     startCountdown();
   }
 
@@ -125,6 +145,7 @@ export default function SOSScreen() {
   }
 
   async function activateSOS() {
+    // ✅ FIX: Pehle check karo, agar location ya deviceId nahi hai toh error dikhao
     if (!deviceId || !currentLocation) {
       Alert.alert('Error', 'Location ya Device ID nahi mili. Dobara try karo.');
       return;
@@ -133,11 +154,9 @@ export default function SOSScreen() {
     try {
       Vibration.vibrate([0, 500, 200, 500, 200, 500]);
 
-      // Firebase me emergency session create karo
       const sessionId = await createEmergencySession(deviceId, currentLocation, address);
       setSOSActive(true, sessionId);
 
-      // SMS bhejo contacts ko
       await sendEmergencySMS(contacts, currentLocation, deviceId);
 
       // Live location tracking shuru karo
@@ -146,17 +165,16 @@ export default function SOSScreen() {
           setCurrentLocation(coords);
           const newAddr = await getAddressFromCoords(coords);
           setAddress(newAddr);
-          // Firebase me live update bhejo
           await updateLiveLocation(sessionId, coords);
         }
       );
 
+      // ✅ FIX: Sirf ek hi alert — success wala
       Alert.alert(
         '🚨 SOS Activated!',
-        `${contacts.length} contacts have been messaged and your location is being shared.`,
+        `${contacts.length} contacts ko message bheja gaya. Location share ho rahi hai.`,
         [{ text: 'OK' }]
       );
-      Alert.alert('Error', 'Location or Device ID not available. Please try again.');
     } catch (error) {
       console.error('SOS activation error:', error);
       Alert.alert('Error', 'SOS activate karne mein dikkat aayi. Dobara try karo.');
@@ -173,9 +191,11 @@ export default function SOSScreen() {
       }
 
       setSOSActive(false);
+      setHelpers([]);
       Vibration.cancel();
+
+      // ✅ FIX: Sirf ek hi alert
       Alert.alert('✅ SOS Band Ho Gaya', 'Emergency alert cancel ho gaya. Sab theek ho?');
-      Alert.alert('✅ SOS Stopped', 'Emergency alert canceled. Are you okay?');
     } catch (error) {
       console.error('Cancel SOS error:', error);
       setSOSActive(false);
@@ -241,26 +261,51 @@ export default function SOSScreen() {
                   color="#fff"
                 />
                 <Text style={styles.sosText}>{isSOSActive ? 'STOP' : 'SOS'}</Text>
-                {!isSOSActive && <Text style={styles.sosSubText}>Press & Hold</Text>}
+                {!isSOSActive && <Text style={styles.sosSubText}>Press to activate</Text>}
               </View>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Info */}
+        {/* Info text */}
         {!isSOSActive && !isCountingDown && (
           <Text style={styles.infoText}>
             Press the button → 3 second countdown → SMS + location will be sent to {contacts.length} contacts
           </Text>
         )}
 
+        {/* SOS Active Info */}
         {isSOSActive && (
           <View style={styles.activeInfo}>
             <Text style={styles.activeInfoTitle}>🚨 Alert Active Hai</Text>
-            <Text style={styles.activeInfoTitle}>🚨 Alert Active</Text>
-            <Text style={styles.activeInfoText}>• Location is updating every 5 seconds</Text>
-            <Text style={styles.activeInfoText}>• {contacts.length} contacts were sent an SMS</Text>
-            <Text style={styles.activeInfoText}>• Friends can be viewed on the radar</Text>
+            <Text style={styles.activeInfoText}>• Location har 5 seconds update ho rahi hai</Text>
+            <Text style={styles.activeInfoText}>• {contacts.length} contacts ko SMS gaya</Text>
+            <Text style={styles.activeInfoText}>• Dost radar par dikh rahe hain</Text>
+
+            {/* ─── Helpers Section ─── */}
+            {helpers.length > 0 ? (
+              <View style={styles.helpersSection}>
+                <Text style={styles.helpersSectionTitle}>
+                  🏃 {helpers.length} dost aa rahe hain!
+                </Text>
+                {helpers.map((h) => (
+                  <View key={h.deviceId} style={styles.helperRow}>
+                    <View style={styles.helperDot} />
+                    <Text style={styles.helperName}>{h.nickname}</Text>
+                    <Text style={styles.helperStatus}>Aa raha hai →</Text>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={styles.viewOnMapBtn}
+                  onPress={() => router.push('/(tabs)/radar')}
+                >
+                  <Ionicons name="map" size={16} color="#fff" />
+                  <Text style={styles.viewOnMapText}>Map par dekho</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.activeInfoText}>• Koi dost abhi tak accept nahi kiya</Text>
+            )}
           </View>
         )}
 
@@ -381,13 +426,8 @@ const styles = StyleSheet.create({
     shadowRadius: 30,
     elevation: 20,
   },
-  sosButtonActive: {
-    backgroundColor: '#CC1010',
-  },
-  sosButtonCounting: {
-    backgroundColor: '#FF9500',
-    shadowColor: '#FF9500',
-  },
+  sosButtonActive: { backgroundColor: '#CC1010' },
+  sosButtonCounting: { backgroundColor: '#FF9500', shadowColor: '#FF9500' },
   sosInner: { alignItems: 'center', gap: 4 },
   sosText: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 4 },
   sosSubText: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
@@ -416,10 +456,39 @@ const styles = StyleSheet.create({
   activeInfoTitle: { color: '#FF3B30', fontWeight: '700', fontSize: 15, marginBottom: 4 },
   activeInfoText: { color: '#ccc', fontSize: 13, lineHeight: 20 },
 
-  quickActions: {
-    flexDirection: 'row',
-    gap: 12,
+  // Helpers
+  helpersSection: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#3a0808',
+    paddingTop: 12,
+    gap: 8,
   },
+  helpersSectionTitle: { color: '#FF9500', fontWeight: '700', fontSize: 14 },
+  helperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  helperDot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: '#30D158',
+  },
+  helperName: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
+  helperStatus: { color: '#30D158', fontSize: 12 },
+  viewOnMapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    padding: 10,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  viewOnMapText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  quickActions: { flexDirection: 'row', gap: 12 },
   actionCard: {
     flex: 1,
     backgroundColor: '#161616',
@@ -431,9 +500,5 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   actionLabel: { color: '#ccc', fontSize: 12, fontWeight: '600' },
-  actionCount: {
-    color: '#FF3B30',
-    fontSize: 18,
-    fontWeight: '800',
-  },
+  actionCount: { color: '#FF3B30', fontSize: 18, fontWeight: '800' },
 });
