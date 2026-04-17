@@ -1,34 +1,52 @@
 // app/(tabs)/radar.tsx
-// Radar Screen — friends ki location + helper mode
+// Radar Screen — friends' locations + helper mode
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Modal,
+  Platform,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+// Use dynamic import for clipboard to avoid bundler error if module isn't installed
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-    HelperInfo,
-    removeHelperLocation,
-    subscribeFriendLocation,
-    subscribeHelperLocations,
+  HelperInfo,
+  removeHelperLocation,
+  subscribeFriendLocation,
+  subscribeHelperLocations,
 } from '../../services/emergency';
 import {
-    acceptFriendRequest,
-    rejectFriendRequest,
-    sendFriendRequest,
+  acceptFriendRequest,
+  rejectFriendRequest,
+  sendFriendRequest,
 } from '../../services/friends';
 import { Coordinates, getCurrentLocation } from '../../services/location';
 import { useAppStore } from '../../store/useAppStore';
+
+// Haversine distance (km)
+function haversineKm(a: Coordinates, b: Coordinates): number {
+  const R = 6371;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+function formatDistance(km: number): string {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(2)} km`;
+}
 
 interface FriendLocation extends Coordinates {
   deviceId: string;
@@ -39,8 +57,9 @@ interface FriendLocation extends Coordinates {
 export default function RadarScreen() {
   const { deviceId, friends, pendingRequests, outgoingRequests, helpingState, setHelpingState,
           setFriends, setPendingRequests, setOutgoingRequests } = useAppStore();
+  const router = useRouter();
 
-  // URL params — jab notification se aao ya _layout se navigate ho
+  // URL params — when arriving from a notification or _layout navigation
   const { helpingSessionId, friendNickname } = useLocalSearchParams<{
     helpingSessionId?: string;
     friendNickname?: string;
@@ -52,17 +71,17 @@ export default function RadarScreen() {
   const [friendIdInput, setFriendIdInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Helper mode: SOS person ki live location
+  // Helper mode: SOS person's live location
   const [sosFriendLocation, setSosFriendLocation] = useState<(Coordinates & { updatedAt?: number }) | null>(null);
-  // SOS person ke helpers (agar mai SOS person hoon)
+  // SOS person's helpers (if I'm the SOS person)
   const [helpers, setHelpers] = useState<HelperInfo[]>([]);
 
   const mapRef = useRef<MapView>(null);
   const unsubscribers = useRef<(() => void)[]>([]);
 
-  // Active helping session — ya store se ya URL params se
+  // Active helping session — from store or URL params
   const activeHelpingSessionId = helpingState?.sessionId ?? helpingSessionId ?? null;
-  const activeHelpingNickname = helpingState?.friendNickname ?? friendNickname ?? 'Dost';
+  const activeHelpingNickname = helpingState?.friendNickname ?? friendNickname ?? 'Friend';
   const isHelpingMode = !!activeHelpingSessionId;
 
   useEffect(() => {
@@ -72,14 +91,32 @@ export default function RadarScreen() {
     };
   }, []);
 
+  // Distance between me and SOS friend (shown to helper)
+  const [distanceToSos, setDistanceToSos] = useState<number | null>(null);
+  useEffect(() => {
+    if (myLocation && sosFriendLocation) {
+      const d = haversineKm(myLocation, sosFriendLocation);
+      try { console.log('[Radar] distance calc', { activeHelpingSessionId, myLocation, sosFriendLocation, distance: d }); } catch {}
+      setDistanceToSos(d);
+    } else if (isHelpingMode) {
+      try { console.log('[Radar] distance skipped', { activeHelpingSessionId, myLocation, sosFriendLocation }); } catch {}
+    }
+  }, [myLocation, sosFriendLocation, isHelpingMode, activeHelpingSessionId]);
+
   // Helper mode: SOS person ki location subscribe karo
   useEffect(() => {
-    if (!isHelpingMode || !activeHelpingSessionId) return;
+    if (!isHelpingMode || !activeHelpingSessionId) {
+      console.log('[Radar-Helper] Not in helping mode, skipping subscription', { isHelpingMode, activeHelpingSessionId });
+      return;
+    }
 
+    console.log('[Radar-Helper] Setting up subscription to SOS friend location', { activeHelpingSessionId, friendNickname: activeHelpingNickname });
     const unsub = subscribeFriendLocation(activeHelpingSessionId, (loc) => {
+      console.log('[Radar-Helper] SOS friend location updated:', { activeHelpingSessionId, loc, friendNickname: activeHelpingNickname });
       setSosFriendLocation(loc);
-      // Map ko uski location par le jao
-      if (mapRef.current) {
+      // Move map to their location
+      if (mapRef.current && loc) {
+        console.log('[Radar-Helper] Animating map to friend location');
         mapRef.current.animateToRegion({
           latitude: loc.latitude,
           longitude: loc.longitude,
@@ -93,7 +130,7 @@ export default function RadarScreen() {
     return () => unsub();
   }, [activeHelpingSessionId, isHelpingMode]);
 
-  // Agar main SOS person hoon, helpers subscribe karo
+  // If I'm the SOS person, subscribe to helpers
   const { isSOSActive, activeSessionId } = useAppStore();
   useEffect(() => {
     if (!isSOSActive || !activeSessionId) return;
@@ -130,14 +167,19 @@ export default function RadarScreen() {
 
   async function fetchMyLocation() {
     const coords = await getCurrentLocation();
-    if (coords) setMyLocation(coords);
+    if (coords) {
+      try { console.log('[Radar] fetched my location', coords); } catch {}
+      setMyLocation(coords);
+    } else {
+      try { console.log('[Radar] failed to get my location'); } catch {}
+    }
   }
 
   async function stopHelping() {
     if (!activeHelpingSessionId || !deviceId) return;
-    Alert.alert(
-      'Help Band Karo?',
-      'Kya tumne madad kar di ya ja nahi sakte?',
+      Alert.alert(
+        'Stop Helping?',
+        'Have you finished helping or can you not go?',
       [
         { text: 'Continue helping', style: 'cancel' },
         {
@@ -156,7 +198,7 @@ export default function RadarScreen() {
   async function handleSendFriendRequest() {
     if (!deviceId || !friendIdInput.trim()) return;
     if (friendIdInput.trim() === deviceId) {
-      Alert.alert('Error', "Ye tumhara apna ID hai 😅");
+      Alert.alert('Error', "This is your own ID 😅");
       return;
     }
     setIsLoading(true);
@@ -214,7 +256,7 @@ export default function RadarScreen() {
             <Marker
               coordinate={{ latitude: sosFriendLocation.latitude, longitude: sosFriendLocation.longitude }}
               title={`🚨 ${activeHelpingNickname}`}
-              description="Inhe madad chahiye!"
+              description="They need help!"
             >
               <View style={styles.sosFriendMarker}>
                 <Text style={styles.markerEmoji}>🚨</Text>
@@ -232,11 +274,11 @@ export default function RadarScreen() {
 
         {/* ─── SOS Person Mode: Helpers ki locations ─── */}
         {isSOSActive && helpers.map((h) => h.latitude && h.longitude ? (
-          <Marker
+            <Marker
             key={h.deviceId}
             coordinate={{ latitude: h.latitude!, longitude: h.longitude! }}
             title={`🏃 ${h.nickname}`}
-            description="Aa raha hai tumhari madad karne!"
+            description="Coming to help you!"
           >
             <View style={styles.helperMarker}>
               <Text style={styles.markerEmoji}>🏃</Text>
@@ -265,6 +307,11 @@ export default function RadarScreen() {
           <Text style={styles.title}>
             {isHelpingMode ? `Helping ${activeHelpingNickname}` : 'Radar'}
           </Text>
+          {isHelpingMode && distanceToSos !== null && (
+            <View style={styles.distanceBadge}>
+              <Text style={styles.distanceBadgeText}>{formatDistance(distanceToSos)}</Text>
+            </View>
+          )}
           <View style={styles.topActions}>
             <TouchableOpacity
               style={styles.iconBtn}
@@ -292,6 +339,36 @@ export default function RadarScreen() {
         <View style={styles.deviceIdCard}>
           <Text style={styles.deviceIdLabel}>My Device ID:</Text>
           <Text style={styles.deviceIdValue} selectable>{deviceId ?? 'Loading...'}</Text>
+          <View style={styles.deviceIdActions}>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={async () => {
+                if (!deviceId) return Alert.alert('Error', 'Device ID not available');
+                try {
+                  const Clip = await import('expo-clipboard');
+                  await Clip.setStringAsync(deviceId);
+                  Alert.alert('Copied', 'Device ID copied to clipboard');
+                } catch (e) {
+                  Alert.alert('Clipboard unavailable', 'Install expo-clipboard or copy manually');
+                }
+              }}
+            >
+              <Text style={styles.smallBtnText}>Copy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={async () => {
+                if (!deviceId) return Alert.alert('Error', 'Device ID not available');
+                try {
+                  await Share.share({ message: deviceId });
+                } catch (e) {
+                  Alert.alert('Error', 'Share failed');
+                }
+              }}
+            >
+              <Text style={styles.smallBtnText}>Share</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -302,9 +379,29 @@ export default function RadarScreen() {
             <Text style={styles.helpingBannerTitle}>🏃 Help Mode Active</Text>
             <Text style={styles.helpingBannerSub}>
               {sosFriendLocation
-                ? `${activeHelpingNickname} ki location live update ho rahi hai`
-                : `${activeHelpingNickname} ki location dhundh raha hoon...`}
+                ? `${activeHelpingNickname}'s location is updating live`
+                : `Searching for ${activeHelpingNickname}'s location...`}
             </Text>
+            {/* Open distance map button */}
+            {sosFriendLocation && (
+              <TouchableOpacity
+                style={styles.openMapBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: '/sos-map',
+                    params: {
+                      sessionId: activeHelpingSessionId!,
+                      role: 'helper',
+                      victimLat: sosFriendLocation.latitude.toString(),
+                      victimLon: sosFriendLocation.longitude.toString(),
+                    },
+                  })
+                }
+              >
+                <Ionicons name="map" size={13} color="#30D158" />
+                <Text style={styles.openMapBtnText}>Open Distance Map</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity style={styles.stopHelpBtn} onPress={stopHelping}>
             <Text style={styles.stopHelpBtnText}>Stop</Text>
@@ -367,6 +464,22 @@ export default function RadarScreen() {
                 autoCorrect={false}
                 autoCapitalize="none"
               />
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <TouchableOpacity
+                  style={[styles.sendBtn, styles.pasteBtn]}
+                  onPress={async () => {
+                    try {
+                      const Clip = await import('expo-clipboard');
+                      const text = await Clip.getStringAsync();
+                      if (text) setFriendIdInput(text.trim());
+                    } catch (e) {
+                      Alert.alert('Clipboard unavailable', 'Install expo-clipboard or paste manually');
+                    }
+                  }}
+                >
+                  <Text style={styles.sendBtnText}>Paste from clipboard</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity
                 style={[styles.sendBtn, isLoading && styles.sendBtnDisabled]}
                 onPress={handleSendFriendRequest}
@@ -414,6 +527,15 @@ const styles = StyleSheet.create({
   },
   deviceIdLabel: { color: '#888', fontSize: 11, marginBottom: 4 },
   deviceIdValue: { color: '#fff', fontSize: 12, fontFamily: 'monospace' },
+  deviceIdActions: { flexDirection: 'row', gap: 8, marginLeft: 8, marginTop: 6 },
+  smallBtn: {
+    backgroundColor: '#161616',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  smallBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  pasteBtn: { backgroundColor: '#1a1a1a' },
 
   sosFriendMarker: {
     backgroundColor: '#FF3B30', borderRadius: 20, padding: 8,
@@ -446,6 +568,25 @@ const styles = StyleSheet.create({
     borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
   },
   stopHelpBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  openMapBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginTop: 8, alignSelf: 'flex-start',
+    backgroundColor: 'rgba(48,209,88,0.15)',
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1, borderColor: '#30D158',
+  },
+  openMapBtnText: { color: '#30D158', fontSize: 12, fontWeight: '700' },
+
+  distanceBadge: {
+    marginLeft: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  distanceBadgeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
 
   bottomSheet: {
     position: 'absolute', bottom: 90, left: 16, right: 16,

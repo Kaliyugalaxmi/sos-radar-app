@@ -32,7 +32,7 @@ export default function SOSScreen() {
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
   const [address, setAddress] = useState('Fetching location...');
   const [isFetchingLocation, setIsFetchingLocation] = useState(false);
-  // Helpers jo aa rahe hain
+  // Helpers coming
   const [helpers, setHelpers] = useState<HelperInfo[]>([]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -40,7 +40,7 @@ export default function SOSScreen() {
   const stopWatchingLocation = useRef<(() => void) | null>(null);
   const stopWatchingHelpers = useRef<(() => void) | null>(null);
 
-  // Pulse animation jab SOS active ho
+  // Pulse animation when SOS is active
   useEffect(() => {
     if (isSOSActive) {
       Animated.loop(
@@ -54,7 +54,7 @@ export default function SOSScreen() {
     }
   }, [isSOSActive]);
 
-  // Helper locations subscribe karo jab SOS active ho
+  // Subscribe to helper locations when SOS is active
   useEffect(() => {
     if (isSOSActive && activeSessionId) {
       stopWatchingHelpers.current = subscribeHelperLocations(activeSessionId, (h) => {
@@ -145,9 +145,9 @@ export default function SOSScreen() {
   }
 
   async function activateSOS() {
-    // ✅ FIX: Pehle check karo, agar location ya deviceId nahi hai toh error dikhao
+    // ✅ FIX: First check; show error if location or deviceId missing
     if (!deviceId || !currentLocation) {
-      Alert.alert('Error', 'Location ya Device ID nahi mili. Dobara try karo.');
+      Alert.alert('Error', 'Location or device ID not found. Please try again.');
       return;
     }
 
@@ -159,25 +159,27 @@ export default function SOSScreen() {
 
       await sendEmergencySMS(contacts, currentLocation, deviceId);
 
-      // Live location tracking shuru karo
+      // Start live location tracking
       stopWatchingLocation.current = watchLocation(
         async (coords) => {
+          console.log('[SOS-Victim] Location update:', { sessionId, coords });
           setCurrentLocation(coords);
           const newAddr = await getAddressFromCoords(coords);
           setAddress(newAddr);
           await updateLiveLocation(sessionId, coords);
+          console.log('[SOS-Victim] Location sent to Firebase:', { sessionId, coords });
         }
       );
 
-      // ✅ FIX: Sirf ek hi alert — success wala
+      // ✅ FIX: Single success alert
       Alert.alert(
         '🚨 SOS Activated!',
-        `${contacts.length} contacts ko message bheja gaya. Location share ho rahi hai.`,
+        `Notified ${contacts.length} contacts. Sharing location.`,
         [{ text: 'OK' }]
       );
     } catch (error) {
       console.error('SOS activation error:', error);
-      Alert.alert('Error', 'SOS activate karne mein dikkat aayi. Dobara try karo.');
+      Alert.alert('Error', 'Failed to activate SOS. Please try again.');
     }
   }
 
@@ -194,8 +196,8 @@ export default function SOSScreen() {
       setHelpers([]);
       Vibration.cancel();
 
-      // ✅ FIX: Sirf ek hi alert
-      Alert.alert('✅ SOS Band Ho Gaya', 'Emergency alert cancel ho gaya. Sab theek ho?');
+      // ✅ FIX: Single cancel alert
+      Alert.alert('✅ SOS Cancelled', 'Emergency alert cancelled. Are you okay?');
     } catch (error) {
       console.error('Cancel SOS error:', error);
       setSOSActive(false);
@@ -277,34 +279,44 @@ export default function SOSScreen() {
         {/* SOS Active Info */}
         {isSOSActive && (
           <View style={styles.activeInfo}>
-            <Text style={styles.activeInfoTitle}>🚨 Alert Active Hai</Text>
-            <Text style={styles.activeInfoText}>• Location har 5 seconds update ho rahi hai</Text>
-            <Text style={styles.activeInfoText}>• {contacts.length} contacts ko SMS gaya</Text>
-            <Text style={styles.activeInfoText}>• Dost radar par dikh rahe hain</Text>
+            <Text style={styles.activeInfoTitle}>🚨 Alert Active</Text>
+            <Text style={styles.activeInfoText}>• Location updates every 5 seconds</Text>
+            <Text style={styles.activeInfoText}>• SMS sent to {contacts.length} contacts</Text>
+            <Text style={styles.activeInfoText}>• Friends are visible on the radar</Text>
 
             {/* ─── Helpers Section ─── */}
             {helpers.length > 0 ? (
               <View style={styles.helpersSection}>
                 <Text style={styles.helpersSectionTitle}>
-                  🏃 {helpers.length} dost aa rahe hain!
+                  🏃 {helpers.length} friends are coming!
                 </Text>
                 {helpers.map((h) => (
                   <View key={h.deviceId} style={styles.helperRow}>
                     <View style={styles.helperDot} />
                     <Text style={styles.helperName}>{h.nickname}</Text>
-                    <Text style={styles.helperStatus}>Aa raha hai →</Text>
+                    <Text style={styles.helperStatus}>On the way →</Text>
                   </View>
                 ))}
                 <TouchableOpacity
                   style={styles.viewOnMapBtn}
-                  onPress={() => router.push('/(tabs)/radar')}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/sos-map',
+                      params: {
+                        sessionId: activeSessionId!,
+                        role: 'victim',
+                        victimLat: currentLocation?.latitude?.toString() ?? '',
+                        victimLon: currentLocation?.longitude?.toString() ?? '',
+                      },
+                    })
+                  }
                 >
                   <Ionicons name="map" size={16} color="#fff" />
-                  <Text style={styles.viewOnMapText}>Map par dekho</Text>
+                  <Text style={styles.viewOnMapText}>View on map</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <Text style={styles.activeInfoText}>• Koi dost abhi tak accept nahi kiya</Text>
+              <Text style={styles.activeInfoText}>• No friend has accepted yet</Text>
             )}
           </View>
         )}

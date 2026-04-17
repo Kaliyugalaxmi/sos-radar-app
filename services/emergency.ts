@@ -95,12 +95,58 @@ export async function updateLiveLocation(
 
 // Session resolve/close karo
 export async function resolveEmergencySession(sessionId: string): Promise<void> {
+  // Notify helpers that the session has been resolved
+  try {
+    const helpersSnap = await get(ref(rtdb, `emergencies/${sessionId}/helpers`));
+    const helpersObj = helpersSnap.exists() ? helpersSnap.val() : null;
+    const helperIds = helpersObj ? Object.keys(helpersObj) : [];
+    // Fetch session owner (victim) to include their name in notifications
+    const sessionSnap = await get(ref(rtdb, `emergencies/${sessionId}`));
+    const sessionObj: any = sessionSnap.exists() ? sessionSnap.val() : null;
+    const victimId: string | null = sessionObj ? sessionObj.deviceId ?? null : null;
+    let victimNick = 'Friend';
+    if (victimId) {
+      try {
+        const vSnap = await get(ref(rtdb, `users/${victimId}`));
+        if (vSnap.exists()) victimNick = vSnap.val()?.nickname ?? victimId;
+      } catch {}
+    }
+    if (helperIds.length > 0) {
+      await Promise.all(
+        helperIds.map(async (helperId) => {
+          try {
+            const userSnap = await get(ref(rtdb, `users/${helperId}`));
+            if (!userSnap.exists()) return;
+            const token: string | null = userSnap.val()?.pushToken ?? null;
+            if (token) {
+              // Notify helper that the victim is safe now, include victim's name
+              await sendExpoPushNotification(
+                token,
+                `✅ ${victimNick} is safe`,
+                `${victimNick} is safe now!`,
+                { sessionId, fromDeviceId: victimId, fromNick: victimNick }
+              );
+            }
+            // Record that helper was notified with structured data
+            await update(ref(rtdb, `users/${helperId}/notifications`), {
+              lastHelpEndedFor: { sessionId, fromDeviceId: victimId, fromNick: victimNick, timestamp: Date.now() },
+            });
+          } catch (err) {
+            console.warn('notify helper on resolve error', err);
+          }
+        })
+      );
+    }
+  } catch (err) {
+    console.warn('resolve notify helpers error', err);
+  }
+
   await update(ref(rtdb, `emergencies/${sessionId}`), {
     status: 'resolved',
     resolvedAt: Date.now(),
   });
   await set(ref(rtdb, `live_locations/${sessionId}`), null);
-  // Helper locations bhi clear karo
+  // Clear helper locations
   await set(ref(rtdb, `helper_locations/${sessionId}`), null);
 }
 
@@ -110,11 +156,53 @@ export function subscribeFriendLocation(
   onUpdate: (location: Coordinates & { updatedAt: number }) => void
 ): () => void {
   const locationRef = ref(rtdb, `live_locations/${sessionId}`);
-  onValue(locationRef, (snapshot) => {
-    const data = snapshot.val();
-    if (data) onUpdate(data);
-  });
-  return () => off(locationRef);
+  
+  // Helper function to normalize location data
+  function normalizeLocation(raw: any): (Coordinates & { updatedAt: number }) | null {
+    if (!raw) return null;
+    const data: any = {};
+    
+    if (raw.latitude != null && raw.longitude != null) {
+      data.latitude = raw.latitude;
+      data.longitude = raw.longitude;
+    } else if (raw.lat != null && (raw.lon != null || raw.lng != null)) {
+      data.latitude = raw.lat;
+      data.longitude = raw.lon ?? raw.lng;
+    } else if (raw.location && raw.location.lat != null) {
+      data.latitude = raw.location.lat;
+      data.longitude = raw.location.lng ?? raw.location.lon;
+    }
+    
+    if (data.latitude == null || data.longitude == null) return null;
+    
+    data.updatedAt = raw.updatedAt ?? Date.now();
+    return data as Coordinates & { updatedAt: number };
+  }
+  
+  // Set up the listener
+  const unsubscribe = onValue(
+    locationRef, 
+    (snapshot) => {
+      const raw = snapshot.val();
+      console.log('[subscribeFriendLocation] Firebase snapshot:', { sessionId, raw });
+      
+      const normalized = normalizeLocation(raw);
+      if (normalized) {
+        console.log('[subscribeFriendLocation] Normalized location:', { sessionId, normalized });
+        onUpdate(normalized);
+      } else {
+        console.warn('[subscribeFriendLocation] Could not normalize location data:', { sessionId, raw });
+      }
+    },
+    (error) => {
+      console.error('[subscribeFriendLocation] Firebase error:', { sessionId, error });
+    }
+  );
+  
+  return () => {
+    console.log('[subscribeFriendLocation] Unsubscribing from:', sessionId);
+    unsubscribe();
+  };
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -136,12 +224,18 @@ export async function acceptHelp(
 export async function updateHelperLocation(
   sessionId: string,
   helperDeviceId: string,
-  location: Coordinates
+  location: Coordinates,
+  helperNickname?: string
 ): Promise<void> {
-  await set(ref(rtdb, `helper_locations/${sessionId}/${helperDeviceId}`), {
+  const payload: any = {
     ...location,
     updatedAt: Date.now(),
-  });
+  };
+  // Include nickname so victim's subscribeHelperLocations receives complete data
+  if (helperNickname) {
+    payload.nickname = helperNickname;
+  }
+  await set(ref(rtdb, `helper_locations/${sessionId}/${helperDeviceId}`), payload);
 }
 
 // Helper ka location clear karo (jab stop kare)
@@ -159,25 +253,44 @@ export function subscribeHelperLocations(
   onUpdate: (helpers: HelperInfo[]) => void
 ): () => void {
   const helpersRef = ref(rtdb, `helper_locations/${sessionId}`);
-  onValue(helpersRef, (snapshot) => {
-    const data = snapshot.val() ?? {};
-    const helpers: HelperInfo[] = Object.entries(data).map(
-      ([deviceId, loc]: [string, any]) => ({
-        deviceId,
-        nickname: loc.nickname ?? deviceId.slice(0, 8),
-        status: 'coming',
-        acceptedAt: loc.acceptedAt ?? 0,
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        updatedAt: loc.updatedAt,
-      })
-    );
-    onUpdate(helpers);
-  });
-  return () => off(helpersRef);
+  
+  const unsubscribe = onValue(
+    helpersRef,
+    (snapshot) => {
+      const raw = snapshot.val() ?? {};
+      console.log('[subscribeHelperLocations] Firebase snapshot:', { sessionId, raw });
+      
+      const helpers: HelperInfo[] = Object.entries(raw)
+        .filter(([_, loc]: [string, any]) => loc != null) // Skip null entries
+        .map(([deviceId, loc]: [string, any]) => {
+          const latitude = loc?.latitude ?? loc?.lat ?? loc?.location?.lat ?? null;
+          const longitude = loc?.longitude ?? loc?.lng ?? loc?.lon ?? loc?.location?.lng ?? loc?.location?.lon ?? null;
+          return {
+            deviceId,
+            nickname: loc?.nickname ?? deviceId.slice(0, 8),
+            status: 'coming' as const,
+            acceptedAt: loc?.acceptedAt ?? 0,
+            latitude: latitude ?? undefined,
+            longitude: longitude ?? undefined,
+            updatedAt: loc?.updatedAt ?? null,
+          } as HelperInfo;
+        });
+      
+      console.log('[subscribeHelperLocations] Processed helpers:', { sessionId, count: helpers.length, helpers });
+      onUpdate(helpers);
+    },
+    (error) => {
+      console.error('[subscribeHelperLocations] Firebase error:', { sessionId, error });
+      onUpdate([]); // Return empty array on error
+    }
+  );
+  
+  return () => {
+    console.log('[subscribeHelperLocations] Unsubscribing from:', sessionId);
+    unsubscribe();
+  };
 }
 
-// Active emergencies fetch karo (friends ki)
 export async function getActiveFriendEmergencies(
   friendDeviceIds: string[]
 ): Promise<EmergencySession[]> {

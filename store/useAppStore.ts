@@ -15,7 +15,7 @@ export interface Friend {
   lastLocation?: { latitude: number; longitude: number };
 }
 
-// Jab main kisi dost ki madad kar raha hoon
+// When I'm helping a friend
 export interface HelpingState {
   sessionId: string;
   friendDeviceId: string;
@@ -31,7 +31,7 @@ interface AppState {
   // Contacts (SMS ke liye)
   contacts: Contact[];
 
-  // Emergency State (mera apna SOS)
+  // Emergency State (my own SOS)
   isSOSActive: boolean;
   activeSessionId: string | null;
 
@@ -40,7 +40,7 @@ interface AppState {
   pendingRequests: string[];
   outgoingRequests: string[];
 
-  // Helper state: kisi dost ki madad kar raha hoon
+  // Helper state: I'm helping a friend
   helpingState: HelpingState | null;
 
   // App initialized?
