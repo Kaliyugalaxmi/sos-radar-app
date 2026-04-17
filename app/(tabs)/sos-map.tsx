@@ -1,28 +1,40 @@
-// app/sos-map.tsx
-// Full-screen SOS map — opened by victim to see helper, or helper to see victim
-// Route params: sessionId, role ('victim' | 'helper'), victimLat, victimLon (optional pre-seed)
+// app/(tabs)/sos-map.tsx
+// Full-screen SOS map route — opened by victim or helper
+// Route params: sessionId, role, victimLat?, victimLon?
 
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SOSMapScreen from '../../app/(tabs)/SOSMapScreen';
 import { useAppStore } from '../../store/useAppStore';
+
+function useScale() {
+  const { width } = useWindowDimensions();
+  const scale = Math.min(Math.max(width / 375, 0.85), 1.2);
+  const s = (size: number) => Math.round(size * scale);
+  return { s };
+}
 
 export default function SOSMapRoute() {
   const router = useRouter();
   const { sessionId, role, victimLat, victimLon } = useLocalSearchParams<{
     sessionId: string;
-    role: string; // 'victim' | 'helper'
+    role: string;
     victimLat?: string;
     victimLon?: string;
   }>();
-
   const { deviceId, nickname } = useAppStore();
+  const { s } = useScale();
 
-  // Pre-seed victim location so map doesn't start blank
   const initialVictimLocation =
     victimLat && victimLon
       ? { latitude: parseFloat(victimLat), longitude: parseFloat(victimLon) }
@@ -33,10 +45,13 @@ export default function SOSMapRoute() {
   if (!sessionId || !deviceId) {
     return (
       <SafeAreaView style={styles.errorContainer}>
-        <Ionicons name="alert-circle" size={48} color="#FF3B30" />
-        <Text style={styles.errorText}>Session not found.</Text>
-        <TouchableOpacity style={styles.backLink} onPress={() => router.back()}>
-          <Text style={styles.backLinkText}>Go back</Text>
+        <Ionicons name="alert-circle" size={s(48)} color="#FF3B30" />
+        <Text style={[styles.errorText, { fontSize: s(16) }]}>Session not found.</Text>
+        <TouchableOpacity
+          style={[styles.backLink, { paddingHorizontal: s(24), paddingVertical: s(12), borderRadius: s(12) }]}
+          onPress={() => router.back()}
+        >
+          <Text style={[styles.backLinkText, { fontSize: s(15) }]}>← Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -47,26 +62,26 @@ export default function SOSMapRoute() {
       <StatusBar style="light" />
 
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color="#fff" />
+      <View style={[styles.header, { paddingHorizontal: s(16), paddingVertical: s(12) }]}>
+        <TouchableOpacity
+          style={[styles.backBtn, { width: s(36), height: s(36), borderRadius: s(18) }]}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={s(19)} color="#fff" />
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>
-            {isVictim ? '🚨 Helper Location' : '🏃 Help'}
+          <Text style={[styles.headerTitle, { fontSize: s(16) }]}>
+            {isVictim ? 'Navigate to Help' : '🏃 Help Mode'}
           </Text>
-          <Text style={styles.headerSub}>
-            {isVictim
-              ? 'See where your friend is'
-              : 'Reach the victim'}
+          <Text style={[styles.headerSub, { fontSize: s(12) }]}>
+            Live location tracking
           </Text>
         </View>
 
-        {/* Live indicator */}
-        <View style={styles.liveTag}>
+        <View style={[styles.liveTag, { borderRadius: s(12), paddingHorizontal: s(8), paddingVertical: s(4) }]}>
           <View style={styles.liveDot} />
-          <Text style={styles.liveText}>LIVE</Text>
+          <Text style={[styles.liveText, { fontSize: s(10) }]}>LIVE</Text>
         </View>
       </View>
 
@@ -83,63 +98,53 @@ export default function SOSMapRoute() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a' },
+  container: { flex: 1, backgroundColor: '#080808' },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#080808',
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: '#181818',
     gap: 12,
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     backgroundColor: '#1a1a1a',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
   },
   headerCenter: { flex: 1 },
-  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  headerSub: { color: '#555', fontSize: 12, marginTop: 1 },
+  headerTitle: { color: '#fff', fontWeight: '700' },
+  headerSub: { color: '#555', marginTop: 2 },
 
   liveTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: '#1a0505',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
     borderWidth: 1,
     borderColor: '#FF3B30',
   },
   liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 6, height: 6, borderRadius: 3,
     backgroundColor: '#FF3B30',
   },
-  liveText: { color: '#FF3B30', fontSize: 10, fontWeight: '800' },
+  liveText: { color: '#FF3B30', fontWeight: '800' },
 
-  // Error state
   errorContainer: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#080808',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
   },
-  errorText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  errorText: { color: '#fff', fontWeight: '600' },
   backLink: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
     backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
   },
-  backLinkText: { color: '#FF3B30', fontWeight: '700', fontSize: 15 },
+  backLinkText: { color: '#FF3B30', fontWeight: '700' },
 });

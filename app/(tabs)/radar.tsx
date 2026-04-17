@@ -1,5 +1,5 @@
 // app/(tabs)/radar.tsx
-// Radar Screen — friends' locations + helper mode
+// Radar Screen — Responsive + Enhanced UI
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,12 +14,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
-// Use dynamic import for clipboard to avoid bundler error if module isn't installed
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   HelperInfo,
+  getActiveFriendEmergencies,
   removeHelperLocation,
   subscribeFriendLocation,
   subscribeHelperLocations,
@@ -31,6 +32,15 @@ import {
 } from '../../services/friends';
 import { Coordinates, getCurrentLocation } from '../../services/location';
 import { useAppStore } from '../../store/useAppStore';
+
+// ─── Scale helper ───────────────────────────────────────────────────────────
+function useScale() {
+  const { width, height } = useWindowDimensions();
+  const BASE = 375;
+  const scale = Math.min(Math.max(width / BASE, 0.8), 1.3);
+  const s = (size: number) => Math.round(size * scale);
+  return { width, height, s };
+}
 
 // Haversine distance (km)
 function haversineKm(a: Coordinates, b: Coordinates): number {
@@ -55,11 +65,13 @@ interface FriendLocation extends Coordinates {
 }
 
 export default function RadarScreen() {
-  const { deviceId, friends, pendingRequests, outgoingRequests, helpingState, setHelpingState,
-          setFriends, setPendingRequests, setOutgoingRequests } = useAppStore();
+  const {
+    deviceId, friends, pendingRequests, outgoingRequests, helpingState, setHelpingState,
+    setFriends, setPendingRequests, setOutgoingRequests,
+  } = useAppStore();
   const router = useRouter();
+  const { width, height, s } = useScale();
 
-  // URL params — when arriving from a notification or _layout navigation
   const { helpingSessionId, friendNickname } = useLocalSearchParams<{
     helpingSessionId?: string;
     friendNickname?: string;
@@ -70,137 +82,128 @@ export default function RadarScreen() {
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendIdInput, setFriendIdInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  // Helper mode: SOS person's live location
   const [sosFriendLocation, setSosFriendLocation] = useState<(Coordinates & { updatedAt?: number }) | null>(null);
-  // SOS person's helpers (if I'm the SOS person)
   const [helpers, setHelpers] = useState<HelperInfo[]>([]);
+  const [distanceToSos, setDistanceToSos] = useState<number | null>(null);
 
   const mapRef = useRef<MapView>(null);
   const unsubscribers = useRef<(() => void)[]>([]);
+  const unsubscribersForFriendsEmergencies = useRef<(() => void)[]>([]);
 
-  // Active helping session — from store or URL params
   const activeHelpingSessionId = helpingState?.sessionId ?? helpingSessionId ?? null;
   const activeHelpingNickname = helpingState?.friendNickname ?? friendNickname ?? 'Friend';
   const isHelpingMode = !!activeHelpingSessionId;
+
+  // Bottom sheet height — ~22% of screen height
+  const BOTTOM_SHEET_BOTTOM = s(90);
 
   useEffect(() => {
     fetchMyLocation();
     return () => {
       unsubscribers.current.forEach((u) => u());
+      unsubscribersForFriendsEmergencies.current.forEach((u) => u());
     };
   }, []);
 
-  // Distance between me and SOS friend (shown to helper)
-  const [distanceToSos, setDistanceToSos] = useState<number | null>(null);
   useEffect(() => {
     if (myLocation && sosFriendLocation) {
-      const d = haversineKm(myLocation, sosFriendLocation);
-      try { console.log('[Radar] distance calc', { activeHelpingSessionId, myLocation, sosFriendLocation, distance: d }); } catch {}
-      setDistanceToSos(d);
-    } else if (isHelpingMode) {
-      try { console.log('[Radar] distance skipped', { activeHelpingSessionId, myLocation, sosFriendLocation }); } catch {}
+      setDistanceToSos(haversineKm(myLocation, sosFriendLocation));
     }
-  }, [myLocation, sosFriendLocation, isHelpingMode, activeHelpingSessionId]);
+  }, [myLocation, sosFriendLocation]);
 
-  // Helper mode: SOS person ki location subscribe karo
   useEffect(() => {
-    if (!isHelpingMode || !activeHelpingSessionId) {
-      console.log('[Radar-Helper] Not in helping mode, skipping subscription', { isHelpingMode, activeHelpingSessionId });
-      return;
-    }
+    if (!isHelpingMode || !activeHelpingSessionId) return;
 
-    console.log('[Radar-Helper] Setting up subscription to SOS friend location', { activeHelpingSessionId, friendNickname: activeHelpingNickname });
+    // Immediately fetch victim's last known location so map shows something right away
+    const { get: fbGet, ref: fbRef } = require('firebase/database');
+    const { rtdb: db } = require('../../config/firebase');
+    fbGet(fbRef(db, `live_locations/${activeHelpingSessionId}`)).then((snap: any) => {
+      if (!snap.exists()) return;
+      const d = snap.val();
+      const lat = d?.latitude ?? d?.lat ?? d?.location?.lat;
+      const lon = d?.longitude ?? d?.lng ?? d?.lon ?? d?.location?.lng ?? d?.location?.lon;
+      if (lat != null && lon != null) {
+        const loc = { latitude: lat, longitude: lon, updatedAt: d?.updatedAt ?? Date.now() };
+        setSosFriendLocation(loc);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: lat, longitude: lon,
+            latitudeDelta: 0.01, longitudeDelta: 0.01,
+          }, 800);
+        }
+      }
+    }).catch(() => {});
+
     const unsub = subscribeFriendLocation(activeHelpingSessionId, (loc) => {
-      console.log('[Radar-Helper] SOS friend location updated:', { activeHelpingSessionId, loc, friendNickname: activeHelpingNickname });
       setSosFriendLocation(loc);
-      // Move map to their location
       if (mapRef.current && loc) {
-        console.log('[Radar-Helper] Animating map to friend location');
         mapRef.current.animateToRegion({
-          latitude: loc.latitude,
-          longitude: loc.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
+          latitude: loc.latitude, longitude: loc.longitude,
+          latitudeDelta: 0.01, longitudeDelta: 0.01,
         }, 1000);
       }
     });
-
     unsubscribers.current.push(unsub);
     return () => unsub();
   }, [activeHelpingSessionId, isHelpingMode]);
 
-  // If I'm the SOS person, subscribe to helpers
   const { isSOSActive, activeSessionId } = useAppStore();
   useEffect(() => {
     if (!isSOSActive || !activeSessionId) return;
-
-    const unsub = subscribeHelperLocations(activeSessionId, (h) => setHelpers(h));
+    const unsub = subscribeHelperLocations(activeSessionId, setHelpers);
     unsubscribers.current.push(unsub);
     return () => unsub();
   }, [isSOSActive, activeSessionId]);
 
-  // Normal mode: Friends ki emergency locations subscribe karo
   useEffect(() => {
-    unsubscribers.current.forEach((u) => u());
-    unsubscribers.current = [];
-
-    (friends ?? [])
-      .filter((f) => f.isInEmergency)
-      .forEach((friend) => {
-        const sessionId = `sos_${friend.deviceId}_latest`;
-        const unsub = subscribeFriendLocation(sessionId, (loc) => {
+    unsubscribersForFriendsEmergencies.current.forEach((u) => u());
+    unsubscribersForFriendsEmergencies.current = [];
+    const friendIdsInEmergency = (friends ?? []).filter((f) => f.isInEmergency).map((f) => f.deviceId);
+    if (friendIdsInEmergency.length === 0) return;
+    getActiveFriendEmergencies(friendIdsInEmergency).then((sessions) => {
+      sessions.forEach((session) => {
+        const friend = (friends ?? []).find((f) => f.deviceId === session.deviceId);
+        if (!friend) return;
+        const unsub = subscribeFriendLocation(session.sessionId, (loc) => {
           setFriendLocations((prev) => {
             const existing = prev.findIndex((fl) => fl.deviceId === friend.deviceId);
             const updated: FriendLocation = { ...loc, deviceId: friend.deviceId, nickname: friend.nickname };
-            if (existing >= 0) {
-              const newArr = [...prev];
-              newArr[existing] = updated;
-              return newArr;
-            }
+            if (existing >= 0) { const n = [...prev]; n[existing] = updated; return n; }
             return [...prev, updated];
           });
         });
-        unsubscribers.current.push(unsub);
+        unsubscribersForFriendsEmergencies.current.push(unsub);
       });
+    }).catch(() => {});
+    return () => {
+      unsubscribersForFriendsEmergencies.current.forEach((u) => u());
+      unsubscribersForFriendsEmergencies.current = [];
+    };
   }, [friends]);
 
   async function fetchMyLocation() {
     const coords = await getCurrentLocation();
-    if (coords) {
-      try { console.log('[Radar] fetched my location', coords); } catch {}
-      setMyLocation(coords);
-    } else {
-      try { console.log('[Radar] failed to get my location'); } catch {}
-    }
+    if (coords) setMyLocation(coords);
   }
 
   async function stopHelping() {
     if (!activeHelpingSessionId || !deviceId) return;
-      Alert.alert(
-        'Stop Helping?',
-        'Have you finished helping or can you not go?',
-      [
-        { text: 'Continue helping', style: 'cancel' },
-        {
-          text: 'Stop',
-          style: 'destructive',
-          onPress: async () => {
-            await removeHelperLocation(activeHelpingSessionId, deviceId);
-            setHelpingState(null);
-            setSosFriendLocation(null);
-          },
+    Alert.alert('Stop Helping?', 'Have you finished helping or can you not go?', [
+      { text: 'Continue helping', style: 'cancel' },
+      {
+        text: 'Stop', style: 'destructive',
+        onPress: async () => {
+          await removeHelperLocation(activeHelpingSessionId, deviceId);
+          setHelpingState(null);
+          setSosFriendLocation(null);
         },
-      ]
-    );
+      },
+    ]);
   }
 
   async function handleSendFriendRequest() {
     if (!deviceId || !friendIdInput.trim()) return;
-    if (friendIdInput.trim() === deviceId) {
-      Alert.alert('Error', "This is your own ID 😅");
-      return;
-    }
+    if (friendIdInput.trim() === deviceId) { Alert.alert('Error', "This is your own ID 😅"); return; }
     setIsLoading(true);
     const result = await sendFriendRequest(deviceId, friendIdInput.trim());
     setIsLoading(false);
@@ -227,6 +230,8 @@ export default function RadarScreen() {
     ? { latitude: myLocation.latitude, longitude: myLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }
     : { latitude: 19.076, longitude: 72.8777, latitudeDelta: 0.1, longitudeDelta: 0.1 };
 
+  const pendingCount = (pendingRequests ?? []).length;
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Map */}
@@ -239,24 +244,18 @@ export default function RadarScreen() {
         showsUserLocation
         showsMyLocationButton={false}
       >
-        {/* Meri location ring */}
         {myLocation && (
           <Circle
-            center={myLocation}
-            radius={100}
-            fillColor="rgba(0,122,255,0.15)"
-            strokeColor="rgba(0,122,255,0.5)"
-            strokeWidth={2}
+            center={myLocation} radius={100}
+            fillColor="rgba(0,122,255,0.12)" strokeColor="rgba(0,122,255,0.5)" strokeWidth={2}
           />
         )}
 
-        {/* ─── Helper Mode: SOS person ki location ─── */}
         {isHelpingMode && sosFriendLocation && (
           <>
             <Marker
               coordinate={{ latitude: sosFriendLocation.latitude, longitude: sosFriendLocation.longitude }}
-              title={`🚨 ${activeHelpingNickname}`}
-              description="They need help!"
+              title={`🚨 ${activeHelpingNickname}`} description="They need help!"
             >
               <View style={styles.sosFriendMarker}>
                 <Text style={styles.markerEmoji}>🚨</Text>
@@ -264,109 +263,101 @@ export default function RadarScreen() {
             </Marker>
             <Circle
               center={{ latitude: sosFriendLocation.latitude, longitude: sosFriendLocation.longitude }}
-              radius={200}
-              fillColor="rgba(255,59,48,0.15)"
-              strokeColor="rgba(255,59,48,0.6)"
-              strokeWidth={2}
+              radius={200} fillColor="rgba(255,59,48,0.12)" strokeColor="rgba(255,59,48,0.55)" strokeWidth={2}
             />
           </>
         )}
 
-        {/* ─── SOS Person Mode: Helpers ki locations ─── */}
-        {isSOSActive && helpers.map((h) => h.latitude && h.longitude ? (
-            <Marker
-            key={h.deviceId}
-            coordinate={{ latitude: h.latitude!, longitude: h.longitude! }}
-            title={`🏃 ${h.nickname}`}
-            description="Coming to help you!"
-          >
-            <View style={styles.helperMarker}>
-              <Text style={styles.markerEmoji}>🏃</Text>
-            </View>
-          </Marker>
-        ) : null)}
+        {isSOSActive && helpers.map((h) =>
+          h.latitude && h.longitude ? (
+            <Marker key={h.deviceId} coordinate={{ latitude: h.latitude!, longitude: h.longitude! }}
+              title={`🏃 ${h.nickname}`} description="Coming to help you!">
+              <View style={styles.helperMarker}><Text style={styles.markerEmoji}>🏃</Text></View>
+            </Marker>
+          ) : null
+        )}
 
-        {/* Normal: Friends ki emergency locations */}
         {!isHelpingMode && friendLocations.map((fl, idx) => (
-          <Marker
-            key={fl.deviceId ?? `fl_${idx}`}
+          <Marker key={fl.deviceId ?? `fl_${idx}`}
             coordinate={{ latitude: fl.latitude, longitude: fl.longitude }}
-            title={`🚨 ${fl.nickname}`}
-            description="SOS Active!"
-          >
-            <View style={styles.sosFriendMarker}>
-              <Text style={styles.markerEmoji}>🚨</Text>
-            </View>
+            title={`🚨 ${fl.nickname}`} description="SOS Active!">
+            <View style={styles.sosFriendMarker}><Text style={styles.markerEmoji}>🚨</Text></View>
           </Marker>
         ))}
       </MapView>
 
-      {/* ─── Top Bar ─── */}
-      <View style={styles.topOverlay}>
-        <View style={styles.topBar}>
-          <Text style={styles.title}>
+      {/* ─── Top Overlay ─── */}
+      <View style={[styles.topOverlay, { padding: s(16), paddingTop: s(48) }]}>
+        {/* Top Bar */}
+        <View style={[styles.topBar, { marginBottom: s(10) }]}>
+          <Text style={[styles.title, { fontSize: s(21) }]}>
             {isHelpingMode ? `Helping ${activeHelpingNickname}` : 'Radar'}
           </Text>
-          {isHelpingMode && distanceToSos !== null && (
-            <View style={styles.distanceBadge}>
-              <Text style={styles.distanceBadgeText}>{formatDistance(distanceToSos)}</Text>
-            </View>
-          )}
-          <View style={styles.topActions}>
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={() => mapRef.current?.animateToRegion(initialRegion, 1000)}
-            >
-              <Ionicons name="locate" size={20} color="#fff" />
-            </TouchableOpacity>
-            {!isHelpingMode && (
-              <TouchableOpacity
-                style={[styles.iconBtn, (pendingRequests ?? []).length > 0 && styles.iconBtnAlert]}
-                onPress={() => setShowAddFriend(true)}
-              >
-                <Ionicons name="person-add" size={20} color="#fff" />
-                {(pendingRequests ?? []).length > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{(pendingRequests ?? []).length}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(8) }}>
+            {isHelpingMode && distanceToSos !== null && (
+              <View style={[styles.distanceBadge, { paddingHorizontal: s(10), paddingVertical: s(6), borderRadius: s(12) }]}>
+                <Text style={[styles.distanceBadgeText, { fontSize: s(12) }]}>
+                  📍 {formatDistance(distanceToSos)}
+                </Text>
+              </View>
             )}
+            <View style={[styles.topActions, { gap: s(8) }]}>
+              <TouchableOpacity
+                style={[styles.iconBtn, { padding: s(10), borderRadius: s(22) }]}
+                onPress={() => mapRef.current?.animateToRegion(initialRegion, 1000)}
+              >
+                <Ionicons name="locate" size={s(19)} color="#fff" />
+              </TouchableOpacity>
+              {!isHelpingMode && (
+                <TouchableOpacity
+                  style={[styles.iconBtn, { padding: s(10), borderRadius: s(22) }, pendingCount > 0 && styles.iconBtnAlert]}
+                  onPress={() => setShowAddFriend(true)}
+                >
+                  <Ionicons name="person-add" size={s(19)} color="#fff" />
+                  {pendingCount > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={[styles.badgeText, { fontSize: s(10) }]}>{pendingCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
 
-        {/* Device ID */}
-        <View style={styles.deviceIdCard}>
-          <Text style={styles.deviceIdLabel}>My Device ID:</Text>
-          <Text style={styles.deviceIdValue} selectable>{deviceId ?? 'Loading...'}</Text>
-          <View style={styles.deviceIdActions}>
+        {/* Device ID Card */}
+        <View style={[styles.deviceIdCard, { borderRadius: s(12), padding: s(12) }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(6), marginBottom: s(4) }}>
+            <View style={styles.deviceIdDot} />
+            <Text style={[styles.deviceIdLabel, { fontSize: s(11) }]}>My Device ID</Text>
+          </View>
+          <Text style={[styles.deviceIdValue, { fontSize: s(12) }]} selectable>
+            {deviceId ?? 'Loading...'}
+          </Text>
+          <View style={[styles.deviceIdActions, { gap: s(6), marginTop: s(8) }]}>
             <TouchableOpacity
-              style={styles.smallBtn}
+              style={[styles.smallBtn, { paddingHorizontal: s(12), paddingVertical: s(6), borderRadius: s(8) }]}
               onPress={async () => {
                 if (!deviceId) return Alert.alert('Error', 'Device ID not available');
                 try {
                   const Clip = await import('expo-clipboard');
                   await Clip.setStringAsync(deviceId);
-                  Alert.alert('Copied', 'Device ID copied to clipboard');
-                } catch (e) {
-                  Alert.alert('Clipboard unavailable', 'Install expo-clipboard or copy manually');
-                }
+                  Alert.alert('Copied', 'Device ID copied!');
+                } catch { Alert.alert('Error', 'Copy manually'); }
               }}
             >
-              <Text style={styles.smallBtnText}>Copy</Text>
+              <Ionicons name="copy-outline" size={s(12)} color="#aaa" style={{ marginRight: 4 }} />
+              <Text style={[styles.smallBtnText, { fontSize: s(12) }]}>Copy</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.smallBtn}
+              style={[styles.smallBtn, { paddingHorizontal: s(12), paddingVertical: s(6), borderRadius: s(8) }]}
               onPress={async () => {
                 if (!deviceId) return Alert.alert('Error', 'Device ID not available');
-                try {
-                  await Share.share({ message: deviceId });
-                } catch (e) {
-                  Alert.alert('Error', 'Share failed');
-                }
+                try { await Share.share({ message: deviceId }); } catch { Alert.alert('Error', 'Share failed'); }
               }}
             >
-              <Text style={styles.smallBtnText}>Share</Text>
+              <Ionicons name="share-outline" size={s(12)} color="#aaa" style={{ marginRight: 4 }} />
+              <Text style={[styles.smallBtnText, { fontSize: s(12) }]}>Share</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -374,54 +365,71 @@ export default function RadarScreen() {
 
       {/* ─── Helper Mode Banner ─── */}
       {isHelpingMode && (
-        <View style={styles.helpingBanner}>
+        <View style={[styles.helpingBanner, {
+          bottom: BOTTOM_SHEET_BOTTOM + s(14),
+          left: s(16), right: s(16),
+          borderRadius: s(18), padding: s(16),
+        }]}>
           <View style={styles.helpingBannerLeft}>
-            <Text style={styles.helpingBannerTitle}>🏃 Help Mode Active</Text>
-            <Text style={styles.helpingBannerSub}>
+            <Text style={[styles.helpingBannerTitle, { fontSize: s(14) }]}>🏃 Help Mode Active</Text>
+            <Text style={[styles.helpingBannerSub, { fontSize: s(12) }]}>
               {sosFriendLocation
-                ? `${activeHelpingNickname}'s location is updating live`
-                : `Searching for ${activeHelpingNickname}'s location...`}
+                ? `${activeHelpingNickname}'s location updating live`
+                : `Searching ${activeHelpingNickname}'s location...`}
             </Text>
-            {/* Open distance map button */}
             {sosFriendLocation && (
               <TouchableOpacity
-                style={styles.openMapBtn}
-                onPress={() =>
-                  router.push({
-                    pathname: '/sos-map',
-                    params: {
-                      sessionId: activeHelpingSessionId!,
-                      role: 'helper',
-                      victimLat: sosFriendLocation.latitude.toString(),
-                      victimLon: sosFriendLocation.longitude.toString(),
-                    },
-                  })
-                }
+                style={[styles.openMapBtn, { borderRadius: s(8), paddingHorizontal: s(10), paddingVertical: s(5), marginTop: s(8) }]}
+                onPress={() => router.push({
+                  pathname: '/sos-map',
+                  params: {
+                    sessionId: activeHelpingSessionId!,
+                    role: 'helper',
+                    victimLat: sosFriendLocation.latitude.toString(),
+                    victimLon: sosFriendLocation.longitude.toString(),
+                  },
+                })}
               >
-                <Ionicons name="map" size={13} color="#30D158" />
-                <Text style={styles.openMapBtnText}>Open Distance Map</Text>
+                <Ionicons name="map" size={s(13)} color="#30D158" />
+                <Text style={[styles.openMapBtnText, { fontSize: s(12) }]}>Open Distance Map</Text>
               </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity style={styles.stopHelpBtn} onPress={stopHelping}>
-            <Text style={styles.stopHelpBtnText}>Stop</Text>
+          <TouchableOpacity
+            style={[styles.stopHelpBtn, { paddingHorizontal: s(14), paddingVertical: s(9), borderRadius: s(10) }]}
+            onPress={stopHelping}
+          >
+            <Text style={[styles.stopHelpBtnText, { fontSize: s(13) }]}>Stop</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* ─── Bottom Sheet: Friends ─── */}
       {!isHelpingMode && (
-        <View style={styles.bottomSheet}>
-          <Text style={styles.bottomTitle}>Friends ({(friends ?? []).length})</Text>
+        <View style={[styles.bottomSheet, {
+          bottom: BOTTOM_SHEET_BOTTOM,
+          left: s(16), right: s(16),
+          borderRadius: s(18), padding: s(14),
+        }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s(10) }}>
+            <Text style={[styles.bottomTitle, { fontSize: s(14) }]}>
+              Friends{(friends ?? []).length > 0 ? ` (${(friends ?? []).length})` : ''}
+            </Text>
+            <TouchableOpacity onPress={() => setShowAddFriend(true)}>
+              <Text style={[{ color: '#FF3B30', fontSize: s(12), fontWeight: '700' }]}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {(friends ?? []).length === 0 ? (
-              <Text style={styles.emptyText}>No friends yet — tap "+" to add</Text>
+              <Text style={[styles.emptyText, { fontSize: s(13) }]}>No friends yet — tap "+ Add" to connect</Text>
             ) : (
               (friends ?? []).map((f, idx) => (
-                <View key={f.deviceId ?? `friend_${idx}`}
-                  style={[styles.friendChip, f.isInEmergency && styles.friendChipEmergency]}>
+                <View
+                  key={f.deviceId ?? `friend_${idx}`}
+                  style={[styles.friendChip, f.isInEmergency && styles.friendChipEmergency, { borderRadius: s(20), paddingHorizontal: s(12), paddingVertical: s(8), marginRight: s(8) }]}
+                >
                   <View style={[styles.friendDot, f.isInEmergency ? styles.dotEmergency : styles.dotSafe]} />
-                  <Text style={styles.friendChipText}>{f.nickname}</Text>
+                  <Text style={[styles.friendChipText, { fontSize: s(13) }]}>{f.nickname}</Text>
                   {f.isInEmergency && <Text>🚨</Text>}
                 </View>
               ))
@@ -433,64 +441,72 @@ export default function RadarScreen() {
       {/* ─── Add Friend Modal ─── */}
       <Modal visible={showAddFriend} animationType="slide" presentationStyle="overFullScreen" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Friends</Text>
+          <View style={[styles.modalContent, { padding: s(24), paddingBottom: s(44) }]}>
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { fontSize: s(22), marginBottom: s(20) }]}>Friends</Text>
 
             {(pendingRequests ?? []).length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Pending Requests ({(pendingRequests ?? []).length})</Text>
+              <View style={[styles.section, { marginBottom: s(22) }]}>
+                <Text style={[styles.sectionTitle, { fontSize: s(12), marginBottom: s(12) }]}>
+                  Pending Requests ({(pendingRequests ?? []).length})
+                </Text>
                 {(pendingRequests ?? []).map((fromId) => (
-                  <View key={fromId} style={styles.requestRow}>
-                    <Text style={styles.requestId}>{fromId.slice(0, 12)}...</Text>
-                    <TouchableOpacity style={[styles.requestBtn, styles.acceptBtn]} onPress={() => handleAcceptRequest(fromId)}>
-                      <Text style={styles.requestBtnText}>✓ Accept</Text>
+                  <View key={fromId} style={[styles.requestRow, { gap: s(10), marginBottom: s(10) }]}>
+                    <Text style={[styles.requestId, { fontSize: s(13) }]}>{fromId.slice(0, 12)}...</Text>
+                    <TouchableOpacity
+                      style={[styles.requestBtn, styles.acceptBtn, { paddingHorizontal: s(12), paddingVertical: s(7), borderRadius: s(8) }]}
+                      onPress={() => handleAcceptRequest(fromId)}
+                    >
+                      <Text style={[styles.requestBtnText, { fontSize: s(13) }]}>✓ Accept</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.requestBtn, styles.rejectBtn]} onPress={() => handleRejectRequest(fromId)}>
-                      <Text style={styles.requestBtnText}>✗</Text>
+                    <TouchableOpacity
+                      style={[styles.requestBtn, styles.rejectBtn, { paddingHorizontal: s(12), paddingVertical: s(7), borderRadius: s(8) }]}
+                      onPress={() => handleRejectRequest(fromId)}
+                    >
+                      <Text style={[styles.requestBtnText, { fontSize: s(13) }]}>✗</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
               </View>
             )}
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Add Friend by Device ID</Text>
+            <View style={[styles.section, { marginBottom: s(20) }]}>
+              <Text style={[styles.sectionTitle, { fontSize: s(12), marginBottom: s(12) }]}>Add Friend by Device ID</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { fontSize: s(14), padding: s(14), marginBottom: s(10), borderRadius: s(12) }]}
                 placeholder="Paste friend's Device ID..."
-                placeholderTextColor="#666"
+                placeholderTextColor="#555"
                 value={friendIdInput}
                 onChangeText={setFriendIdInput}
                 autoCorrect={false}
                 autoCapitalize="none"
               />
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                <TouchableOpacity
-                  style={[styles.sendBtn, styles.pasteBtn]}
-                  onPress={async () => {
-                    try {
-                      const Clip = await import('expo-clipboard');
-                      const text = await Clip.getStringAsync();
-                      if (text) setFriendIdInput(text.trim());
-                    } catch (e) {
-                      Alert.alert('Clipboard unavailable', 'Install expo-clipboard or paste manually');
-                    }
-                  }}
-                >
-                  <Text style={styles.sendBtnText}>Paste from clipboard</Text>
-                </TouchableOpacity>
-              </View>
               <TouchableOpacity
-                style={[styles.sendBtn, isLoading && styles.sendBtnDisabled]}
+                style={[styles.pasteBtn, { padding: s(12), borderRadius: s(10), marginBottom: s(10) }]}
+                onPress={async () => {
+                  try {
+                    const Clip = await import('expo-clipboard');
+                    const text = await Clip.getStringAsync();
+                    if (text) setFriendIdInput(text.trim());
+                  } catch { Alert.alert('Error', 'Paste manually'); }
+                }}
+              >
+                <Ionicons name="clipboard-outline" size={s(15)} color="#888" />
+                <Text style={[styles.pasteBtnText, { fontSize: s(14) }]}>Paste from clipboard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sendBtn, isLoading && styles.sendBtnDisabled, { padding: s(14), borderRadius: s(12) }]}
                 onPress={handleSendFriendRequest}
                 disabled={isLoading}
               >
-                <Text style={styles.sendBtnText}>{isLoading ? 'Sending...' : 'Send Request'}</Text>
+                <Text style={[styles.sendBtnText, { fontSize: s(15) }]}>
+                  {isLoading ? 'Sending...' : 'Send Request'}
+                </Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowAddFriend(false)}>
-              <Text style={styles.closeBtnText}>Close</Text>
+            <TouchableOpacity style={[styles.closeBtn, { padding: s(14) }]} onPress={() => setShowAddFriend(false)}>
+              <Text style={[styles.closeBtnText, { fontSize: s(15) }]}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -502,16 +518,13 @@ export default function RadarScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
 
-  topOverlay: { position: 'absolute', top: 0, left: 0, right: 0, padding: 16, paddingTop: 50 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 10 },
-  topActions: { flexDirection: 'row', gap: 10 },
+  topOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  title: { color: '#fff', fontWeight: '800', textShadowColor: '#000', textShadowRadius: 10, flex: 1 },
+  topActions: { flexDirection: 'row' },
   iconBtn: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 22,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   iconBtnAlert: { borderColor: '#FF3B30' },
   badge: {
@@ -519,23 +532,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30', borderRadius: 8, width: 16, height: 16,
     alignItems: 'center', justifyContent: 'center',
   },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  badgeText: { color: '#fff', fontWeight: '800' },
+
+  distanceBadge: {
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+  },
+  distanceBadgeText: { color: '#fff', fontWeight: '800' },
+
   deviceIdCard: {
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderRadius: 10, padding: 10,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
-  deviceIdLabel: { color: '#888', fontSize: 11, marginBottom: 4 },
-  deviceIdValue: { color: '#fff', fontSize: 12, fontFamily: 'monospace' },
-  deviceIdActions: { flexDirection: 'row', gap: 8, marginLeft: 8, marginTop: 6 },
+  deviceIdDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#30D158' },
+  deviceIdLabel: { color: '#666', fontWeight: '600' },
+  deviceIdValue: { color: '#ccc', fontFamily: 'monospace' },
+  deviceIdActions: { flexDirection: 'row' },
   smallBtn: {
-    backgroundColor: '#161616',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    backgroundColor: '#181818',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  smallBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  pasteBtn: { backgroundColor: '#1a1a1a' },
+  smallBtnText: { color: '#aaa', fontWeight: '600' },
 
   sosFriendMarker: {
     backgroundColor: '#FF3B30', borderRadius: 20, padding: 8,
@@ -547,91 +565,79 @@ const styles = StyleSheet.create({
   },
   markerEmoji: { fontSize: 18 },
 
-  // Helper mode banner
+  // Helper banner
   helpingBanner: {
     position: 'absolute',
-    bottom: 100,
-    left: 16, right: 16,
-    backgroundColor: 'rgba(20,60,20,0.95)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#30D158',
+    backgroundColor: 'rgba(10,30,10,0.96)',
+    borderWidth: 1, borderColor: '#30D158',
     flexDirection: 'row',
     alignItems: 'center',
   },
   helpingBannerLeft: { flex: 1 },
-  helpingBannerTitle: { color: '#30D158', fontWeight: '800', fontSize: 15 },
-  helpingBannerSub: { color: '#ccc', fontSize: 12, marginTop: 2 },
-  stopHelpBtn: {
-    backgroundColor: '#FF3B30',
-    borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
-  },
-  stopHelpBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  helpingBannerTitle: { color: '#30D158', fontWeight: '800' },
+  helpingBannerSub: { color: '#999', marginTop: 2 },
+  stopHelpBtn: { backgroundColor: '#FF3B30' },
+  stopHelpBtnText: { color: '#fff', fontWeight: '700' },
   openMapBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    marginTop: 8, alignSelf: 'flex-start',
-    backgroundColor: 'rgba(48,209,88,0.15)',
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
+    backgroundColor: 'rgba(48,209,88,0.12)',
     borderWidth: 1, borderColor: '#30D158',
   },
-  openMapBtnText: { color: '#30D158', fontSize: 12, fontWeight: '700' },
+  openMapBtnText: { color: '#30D158', fontWeight: '700' },
 
-  distanceBadge: {
-    marginLeft: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  distanceBadgeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
-
+  // Bottom sheet
   bottomSheet: {
-    position: 'absolute', bottom: 90, left: 16, right: 16,
-    backgroundColor: 'rgba(10,10,10,0.9)',
-    borderRadius: 16, padding: 14,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    position: 'absolute',
+    backgroundColor: 'rgba(8,8,8,0.92)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
-  bottomTitle: { color: '#fff', fontWeight: '700', fontSize: 14, marginBottom: 10 },
-  emptyText: { color: '#555', fontSize: 13 },
+  bottomTitle: { color: '#fff', fontWeight: '700' },
+  emptyText: { color: '#444' },
   friendChip: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1a1a1a', borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 8,
-    marginRight: 8, gap: 6,
-    borderWidth: 1, borderColor: '#2a2a2a',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#161616', borderWidth: 1, borderColor: '#222',
   },
-  friendChipEmergency: { borderColor: '#FF3B30', backgroundColor: '#1a0505' },
-  friendDot: { width: 8, height: 8, borderRadius: 4 },
+  friendChipEmergency: { borderColor: '#FF3B30', backgroundColor: '#150404' },
+  friendDot: { width: 7, height: 7, borderRadius: 3.5 },
   dotSafe: { backgroundColor: '#30D158' },
   dotEmergency: { backgroundColor: '#FF3B30' },
-  friendChipText: { color: '#ccc', fontSize: 13, fontWeight: '600' },
+  friendChipText: { color: '#ccc', fontWeight: '600' },
 
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'flex-end' },
   modalContent: {
-    backgroundColor: '#111', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 24, paddingBottom: 40,
+    backgroundColor: '#0e0e0e',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    borderTopWidth: 1, borderTopColor: '#222',
   },
-  modalTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 20 },
-  section: { marginBottom: 24 },
-  sectionTitle: { color: '#888', fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase' },
-  requestRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  requestId: { flex: 1, color: '#ccc', fontSize: 13, fontFamily: 'monospace' },
-  requestBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  acceptBtn: { backgroundColor: '#1a3a1a' },
-  rejectBtn: { backgroundColor: '#3a1a1a' },
-  requestBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  modalHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: '#333', alignSelf: 'center', marginBottom: 16,
+  },
+  modalTitle: { color: '#fff', fontWeight: '800' },
+  section: {},
+  sectionTitle: { color: '#555', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  requestRow: { flexDirection: 'row', alignItems: 'center' },
+  requestId: { flex: 1, color: '#aaa', fontFamily: 'monospace' },
+  requestBtn: {},
+  acceptBtn: { backgroundColor: '#0f2a0f' },
+  rejectBtn: { backgroundColor: '#2a0f0f' },
+  requestBtnText: { color: '#fff', fontWeight: '700' },
   input: {
-    backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14,
-    color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#2a2a2a',
-    marginBottom: 12, fontFamily: 'monospace',
+    backgroundColor: '#181818',
+    color: '#fff',
+    borderWidth: 1, borderColor: '#2a2a2a',
+    fontFamily: 'monospace',
   },
-  sendBtn: { backgroundColor: '#FF3B30', borderRadius: 10, padding: 14, alignItems: 'center' },
+  pasteBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#181818',
+    borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  pasteBtnText: { color: '#888' },
+  sendBtn: { backgroundColor: '#FF3B30', alignItems: 'center' },
   sendBtnDisabled: { opacity: 0.5 },
-  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  closeBtn: { marginTop: 10, alignItems: 'center', padding: 14 },
-  closeBtnText: { color: '#888', fontSize: 15 },
+  sendBtnText: { color: '#fff', fontWeight: '700' },
+  closeBtn: { alignItems: 'center' },
+  closeBtnText: { color: '#555' },
 });

@@ -8,7 +8,7 @@ import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { rtdb } from '../config/firebase';
 import { getOrCreateDeviceId } from '../services/deviceId';
-import { acceptHelp, updateHelperLocation } from '../services/emergency';
+import { acceptHelp, getActiveFriendEmergencies, updateHelperLocation } from '../services/emergency';
 import { getOrCreateProfile, updatePushToken } from '../services/friends';
 import { getCurrentLocation, watchLocation } from '../services/location';
 import { getExpoPushToken } from '../services/notifications';
@@ -89,6 +89,9 @@ export default function RootLayout() {
 
         async function resolveFriends(friendIds: any): Promise<any[]> {
           const ids: string[] = Array.isArray(friendIds) ? friendIds : [];
+          if (ids.length === 0) return [];
+
+          // Step 1: fetch nicknames
           const results = await Promise.all(
             ids.map(async (id) => {
               try {
@@ -100,7 +103,18 @@ export default function RootLayout() {
               }
             })
           );
-          return results;
+
+          // Step 2: check which friends have active emergencies
+          try {
+            const activeSessions = await getActiveFriendEmergencies(ids);
+            const emergencyIds = new Set(activeSessions.map((s) => s.deviceId));
+            return results.map((f) => ({
+              ...f,
+              isInEmergency: emergencyIds.has(f.deviceId),
+            }));
+          } catch {
+            return results;
+          }
         }
 
         const resolved = await resolveFriends(profile.friends ?? []);
