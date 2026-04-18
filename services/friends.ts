@@ -20,7 +20,7 @@ export interface UserProfile {
   createdAt: any;
 }
 
-// User profile banao ya fetch karo
+// Create or fetch user profile
 export async function getOrCreateProfile(
   deviceId: string,
   nickname?: string
@@ -32,7 +32,7 @@ export async function getOrCreateProfile(
     return snap.val() as UserProfile;
   }
 
-  // Naya profile banao
+  // Create new profile
   const newProfile: UserProfile = {
     deviceId,
     nickname: nickname ?? `User_${deviceId.slice(0, 6)}`,
@@ -47,7 +47,7 @@ export async function getOrCreateProfile(
   return newProfile;
 }
 
-// Nickname update karo
+// Update nickname
 export async function updateNickname(
   deviceId: string,
   nickname: string
@@ -63,13 +63,13 @@ export async function updatePushToken(deviceId: string, pushToken: string | null
   }
 }
 
-// Friend request bhejo (deviceId se)
+// Send friend request (via deviceId)
 export async function sendFriendRequest(
   fromDeviceId: string,
   toDeviceId: string
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Check karo ki user exist karta hai
+    // Check if user exists
     const toUserSnap = await get(ref(rtdb, `users/${toDeviceId}`));
     if (!toUserSnap.exists()) {
       return { success: false, message: 'This ID does not match any user.' };
@@ -83,7 +83,7 @@ export async function sendFriendRequest(
       createdAt: Date.now(),
     });
 
-    // Receiver ke pendingRequests me add karo (read-modify-write)
+    // Add to receiver's pending requests (read-modify-write)
     const pendingRef = ref(rtdb, `users/${toDeviceId}/pendingRequests`);
     const pendingSnap = await get(pendingRef);
     const arr: string[] = pendingSnap.exists() ? pendingSnap.val() : [];
@@ -132,7 +132,7 @@ export async function acceptFriendRequest(
   const requestId = `${fromDeviceId}_${myDeviceId}`;
   await update(ref(rtdb, `friend_requests/${requestId}`), { status: 'accepted' });
 
-  // Dono ke friends list me add karo (read-modify-write)
+  // Add to both friends lists (read-modify-write)
   const myFriendsRef = ref(rtdb, `users/${myDeviceId}/friends`);
   const myFriendsSnap = await get(myFriendsRef);
   const myFriends: string[] = myFriendsSnap.exists() ? myFriendsSnap.val() : [];
@@ -168,7 +168,7 @@ export async function acceptFriendRequest(
   }
 }
 
-// Friend reject karo
+// Reject friend request
 export async function rejectFriendRequest(
   myDeviceId: string,
   fromDeviceId: string
@@ -194,7 +194,7 @@ export async function rejectFriendRequest(
   }
 }
 
-// Friend remove karo
+// Remove friend
 export async function removeFriend(
   myDeviceId: string,
   friendDeviceId: string

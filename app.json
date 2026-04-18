@@ -15,9 +15,9 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Emergency SOS ke liye aapki location zaroori hai",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "SOS active hone par background mein location track karne ke liye",
-        "NSLocationAlwaysUsageDescription": "SOS active hone par background mein location share karne ke liye"
+        "NSLocationWhenInUseUsageDescription": "Your location is required for Emergency SOS",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Background location tracking is needed when SOS is active",
+        "NSLocationAlwaysUsageDescription": "Background location sharing is required when SOS is active"
       }
     },
     "android": {
@@ -65,3 +65,4 @@
     "owner": "laxmikonar"
   }
 }
+

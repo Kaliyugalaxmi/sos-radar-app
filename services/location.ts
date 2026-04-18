@@ -7,19 +7,19 @@ export interface Coordinates {
   accuracy?: number;
 }
 
-// Permission maango
+// Request permission
 export async function requestLocationPermission(): Promise<boolean> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   return status === 'granted';
 }
 
-// Background permission (live tracking ke liye)
+  // Background permission (for live tracking)
 export async function requestBackgroundPermission(): Promise<boolean> {
   const { status } = await Location.requestBackgroundPermissionsAsync();
   return status === 'granted';
 }
 
-// Ek baar current location fetch karo
+// Fetch current location once
 export async function getCurrentLocation(): Promise<Coordinates | null> {
   try {
     const hasPermission = await requestLocationPermission();
@@ -40,7 +40,7 @@ export async function getCurrentLocation(): Promise<Coordinates | null> {
   }
 }
 
-// Live location watch (SOS active hone par)
+  // Watch live location (when SOS is active)
 export function watchLocation(
   onUpdate: (coords: Coordinates) => void,
   onError?: (error: string) => void
@@ -50,8 +50,8 @@ export function watchLocation(
   Location.watchPositionAsync(
     {
       accuracy: Location.Accuracy.High,
-      timeInterval: 5000,    // Har 5 seconds
-      distanceInterval: 10,  // Ya 10 meter movement par
+    timeInterval: 5000,    // Every 5 seconds
+    distanceInterval: 10,  // Or after 10 meter movement
     },
     (location) => {
       onUpdate({
@@ -66,7 +66,7 @@ export function watchLocation(
     onError?.(err.message);
   });
 
-  // Cleanup function return karo
+  // Return cleanup function
   return () => {
     subscription?.remove();
   };

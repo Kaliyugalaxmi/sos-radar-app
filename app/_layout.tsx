@@ -17,19 +17,15 @@ import { useAppStore } from '../store/useAppStore';
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  // Best-effort: catch unhandled promise rejections to avoid crashing Metro/Expo
   try {
     // @ts-ignore
     if (typeof global !== 'undefined') {
-      // Some environments expose 'onunhandledrejection'
-      // Attach a no-op logger to avoid uncaught promise rejections stopping execution
-      // This is a minimal safeguard; proper fixes should handle the underlying error.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (global as any).onunhandledrejection = (ev: any) => {
         console.warn('Unhandled promise rejection caught:', ev?.reason ?? ev);
       };
     }
   } catch (err) {}
+
   const {
     setDeviceId, setNickname, setFriends, setPendingRequests,
     setOutgoingRequests, loadContactsFromStorage, setInitialized,
@@ -37,13 +33,10 @@ export default function RootLayout() {
   } = useAppStore();
   const router = useRouter();
 
-  // Helper location tracking — cleanup ref
   const stopHelperTracking = useRef<(() => void) | null>(null);
 
-  // When helpingState is set, track location and send updates to Firebase
   useEffect(() => {
     if (!helpingState) {
-      // Stop karo
       stopHelperTracking.current?.();
       stopHelperTracking.current = null;
       return;
@@ -54,12 +47,10 @@ export default function RootLayout() {
     const myNick = useAppStore.getState().nickname || myDeviceId?.slice(0, 8) || '';
     if (!myDeviceId) return;
 
-    // Send current location immediately
     getCurrentLocation().then((coords) => {
       if (coords) updateHelperLocation(sessionId, myDeviceId, coords, myNick);
     });
 
-    // Then update every 5 seconds
     stopHelperTracking.current = watchLocation(async (coords) => {
       await updateHelperLocation(sessionId, myDeviceId, coords, myNick);
     });
@@ -91,7 +82,6 @@ export default function RootLayout() {
           const ids: string[] = Array.isArray(friendIds) ? friendIds : [];
           if (ids.length === 0) return [];
 
-          // Step 1: fetch nicknames
           const results = await Promise.all(
             ids.map(async (id) => {
               try {
@@ -104,7 +94,6 @@ export default function RootLayout() {
             })
           );
 
-          // Step 2: check which friends have active emergencies
           try {
             const activeSessions = await getActiveFriendEmergencies(ids);
             const emergencyIds = new Set(activeSessions.map((s) => s.deviceId));
@@ -120,11 +109,13 @@ export default function RootLayout() {
         const resolved = await resolveFriends(profile.friends ?? []);
         setFriends(resolved);
 
-        // Realtime profile subscribe — friend requests + SOS alerts
+        // ── Realtime profile listener ────────────────────────────────────────
+        // Seen timestamps — initialized to 0 so fresh alerts always show
         const lastSOSSeenTs = { value: 0 };
         const lastHelpEndedSeenTs = { value: 0 };
         const profileRef = ref(rtdb, `users/${deviceId}`);
         const isInitialProfileLoad = { value: true };
+
         onValue(profileRef, async (snap) => {
           if (!snap.exists()) return;
           const p: any = snap.val();
@@ -134,21 +125,29 @@ export default function RootLayout() {
           const resolvedLive = await resolveFriends(p.friends ?? []);
           setFriends(resolvedLive);
 
-          // ── SOS Alert Handler ─────────────────────────────────────────────
+          // ── SOS Alert Handler ──────────────────────────────────────────────
           try {
             const sosAlert = p.lastSOSAlert;
-            // If this is the first profile snapshot after app start, mark existing alerts as seen
+
             if (isInitialProfileLoad.value) {
-              lastSOSSeenTs.value = sosAlert?.timestamp ?? lastSOSSeenTs.value;
+              // App just opened — if alert is older than 8 seconds, mark as seen
+              // If it's fresh (within 8s), show it
+              const isFresh = sosAlert?.timestamp && (Date.now() - sosAlert.timestamp) < 8000;
+              if (!isFresh) {
+                lastSOSSeenTs.value = sosAlert?.timestamp ?? 0;
+              }
             }
-            if (!isInitialProfileLoad.value && sosAlert && sosAlert.timestamp && sosAlert.timestamp > lastSOSSeenTs.value) {
+
+            const isMine = sosAlert?.fromDeviceId === deviceId; // Ignore own SOS alerts
+            const isNew = sosAlert?.timestamp && sosAlert.timestamp > lastSOSSeenTs.value;
+
+            if (!isMine && isNew && sosAlert) {
               lastSOSSeenTs.value = sosAlert.timestamp;
 
               const fromId: string = sosAlert.fromDeviceId ?? 'A friend';
               const addr: string = sosAlert.address ?? '';
               const sessionId: string = sosAlert.sessionId;
 
-              // Nickname fetch karo
               let fromNick = fromId;
               try {
                 const friendSnap = await get(ref(rtdb, `users/${fromId}`));
@@ -158,57 +157,57 @@ export default function RootLayout() {
               const myNick = useAppStore.getState().nickname || deviceId.slice(0, 8);
 
               Alert.alert(
-                '🚨 A Friend Needs Help!',
-                `${fromNick} triggered an SOS!\n${addr ? `📍 ${addr}` : ''}\n\nWill you go to help them?`,
+                '🚨 Friend Needs Help!',
+                `${fromNick} triggered SOS!\n${addr ? `📍 ${addr}` : ''}\n\nWill you help?`,
                 [
                   {
-                    text: '✅ Yes, I\'m on my way!',
+                    text: "✅ Yes, I'm coming!",
                     onPress: async () => {
                       try {
-                        // Register in Firebase that I'm coming
                         await acceptHelp(sessionId, deviceId, myNick);
-                        // Set helping state in store (this will trigger location tracking)
                         setHelpingState({
                           sessionId,
                           friendDeviceId: fromId,
                           friendNickname: fromNick,
                           friendAddress: addr,
                         });
-                        // Navigate to radar screen to view SOS person's location
-                        router.push(`/(tabs)/radar?helpingSessionId=${encodeURIComponent(sessionId)}&friendNickname=${encodeURIComponent(fromNick)}`);
+                        router.push(
+                          `/(tabs)/radar?helpingSessionId=${encodeURIComponent(sessionId)}&friendNickname=${encodeURIComponent(fromNick)}`
+                        );
                         Alert.alert(
                           '✅ Help Mode Active',
-                          `You're helping ${fromNick}. They can see your live location.`
+                          `You are helping ${fromNick}. They can see your live location.`
                         );
                       } catch (err) {
-                        Alert.alert('Error', 'Failed to accept help.');
+                        Alert.alert('Error', 'There was an issue accepting help.');
                       }
                     },
                   },
                   {
-                    text: '❌ I can\'t right now',
+                    text: "❌ Not now",
                     style: 'cancel',
                   },
-                ]
+                ],
+                { cancelable: false } // Cannot dismiss by tapping outside
               );
             }
           } catch (err) {
             console.warn('SOS alert handling error', err);
           }
 
-          // ── Help-ended Handler ───────────────────────────────────────────
+          // ── Help-ended Handler ─────────────────────────────────────────────
           try {
             const helpNotif = p?.notifications?.lastHelpEndedFor;
-            // Ignore help-ended notifications on initial load
             if (isInitialProfileLoad.value) {
-              lastHelpEndedSeenTs.value = helpNotif?.timestamp ?? lastHelpEndedSeenTs.value;
+              lastHelpEndedSeenTs.value = helpNotif?.timestamp ?? 0;
             }
-            if (!isInitialProfileLoad.value && helpNotif && helpNotif.timestamp && helpNotif.timestamp > lastHelpEndedSeenTs.value) {
+            const isNewHelpEnd =
+              helpNotif?.timestamp && helpNotif.timestamp > lastHelpEndedSeenTs.value;
+            if (!isInitialProfileLoad.value && isNewHelpEnd) {
               lastHelpEndedSeenTs.value = helpNotif.timestamp;
               const endedSessionId = helpNotif.sessionId ?? helpNotif;
               const fromNick = helpNotif.fromNick ?? 'Friend';
-              Alert.alert(`✅ ${fromNick} is safe now!`);
-              // If we were helping that session, clear helping state
+              Alert.alert('✅ Safe!', `${fromNick} is now safe!`);
               const currentHelping = useAppStore.getState().helpingState;
               if (currentHelping && currentHelping.sessionId === endedSessionId) {
                 setHelpingState(null);
@@ -217,7 +216,8 @@ export default function RootLayout() {
           } catch (err) {
             console.warn('Help-ended handling error', err);
           }
-          // After processing the first snapshot, mark that initial load is done
+
+          // Initial load complete
           if (isInitialProfileLoad.value) isInitialProfileLoad.value = false;
         });
 

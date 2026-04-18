@@ -1,5 +1,5 @@
 // services/emergency.ts
-import { get, off, onValue, ref, set, update } from 'firebase/database';
+import { get, onValue, ref, set, update } from 'firebase/database';
 import { rtdb } from '../config/firebase';
 import { Coordinates } from './location';
 import { sendExpoPushNotification } from './notifications';
@@ -23,7 +23,7 @@ export interface HelperInfo {
   updatedAt?: number;
 }
 
-// SOS press hone par emergency session create karo Firebase me
+// Create emergency session in Firebase when SOS is pressed
 export async function createEmergencySession(
   deviceId: string,
   location: Coordinates,
@@ -81,7 +81,7 @@ export async function createEmergencySession(
   return sessionId;
 }
 
-// SOS person ki live location update karo (har 5 seconds)
+// Update SOS person's live location (every 5 seconds)
 export async function updateLiveLocation(
   sessionId: string,
   location: Coordinates
@@ -93,7 +93,7 @@ export async function updateLiveLocation(
   });
 }
 
-// Session resolve/close karo
+// Resolve/close the session
 export async function resolveEmergencySession(sessionId: string): Promise<void> {
   // Notify helpers that the session has been resolved
   try {
@@ -150,7 +150,7 @@ export async function resolveEmergencySession(sessionId: string): Promise<void> 
   await set(ref(rtdb, `helper_locations/${sessionId}`), null);
 }
 
-// SOS person ki live location subscribe karo (helper dekhta hai)
+// Subscribe to SOS person's live location (helper sees it)
 export function subscribeFriendLocation(
   sessionId: string,
   onUpdate: (location: Coordinates & { updatedAt: number }) => void
@@ -207,7 +207,7 @@ export function subscribeFriendLocation(
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
-// Helper ne accept kiya
+// Helper accepted the request
 export async function acceptHelp(
   sessionId: string,
   helperDeviceId: string,
@@ -220,7 +220,7 @@ export async function acceptHelp(
   });
 }
 
-// Helper ki live location update karo (SOS person dekhega)
+// Update helper's live location (SOS person will see)
 export async function updateHelperLocation(
   sessionId: string,
   helperDeviceId: string,

@@ -1,8 +1,8 @@
 // app/(tabs)/_layout.tsx
-// Tab Bar Layout — Responsive, no clipping, proper SOS icon
+// Responsive Tab Bar — fixed height, no clipping, clean SOS icon
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -11,63 +11,75 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
-  const scale = Math.min(Math.max(width / 375, 0.82), 1.2);
-  const iconSize = Math.round(24 * scale);
-  const sosIconSize = Math.round(25 * scale);
+  // Scale clamped to 0.8–1.15 so icons never blow up on tablets
+  const scale = Math.min(Math.max(width / 375, 0.8), 1.15);
+  const iconSz = Math.round(22 * scale);
+  const labelSz = Math.round(10 * scale);
 
-  // Tab bar total height: safe bottom inset + visible bar height
-  // Use a fixed visible height of 52px so labels+icons always fit
-  const visibleBarHeight = 52;
-  const tabBarHeight = visibleBarHeight + Math.max(insets.bottom, 0);
+  // Exact tab bar height: 56px usable + bottom safe area
+  const BAR_H = 56 + Math.max(insets.bottom, 0);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#080808',
-          borderTopColor: '#181818',
+          backgroundColor: '#0A0A0A',
           borderTopWidth: 1,
-          // Fixed height avoids squishing on non-standard phones
-          height: tabBarHeight,
-          // Padding so content centers in the visible area
-          paddingBottom: Math.max(insets.bottom, 0) + 4,
+          borderTopColor: '#1C1C1C',
+          height: BAR_H,
+          paddingBottom: Math.max(insets.bottom, 2),
           paddingTop: 6,
+          paddingHorizontal: 4,
+          // Prevent Android from adding extra space
+          elevation: 0,
         },
         tabBarActiveTintColor: '#FF3B30',
-        tabBarInactiveTintColor: '#444',
+        tabBarInactiveTintColor: '#3D3D3D',
         tabBarLabelStyle: {
-          fontSize: Math.round(10 * scale),
+          fontSize: labelSz,
           fontWeight: '600',
-          letterSpacing: 0.2,
-          // Remove any default margin that may shift things
-          marginTop: 0,
+          letterSpacing: 0.3,
+          marginTop: 2,
+        },
+        // Remove the default gap between icon and label
+        tabBarIconStyle: { marginBottom: -2 },
+        tabBarItemStyle: {
+          paddingVertical: 0,
+          flex: 1,
         },
       }}
     >
+      {/* ─── SOS Tab ─── */}
       <Tabs.Screen
         name="index"
         options={{
           title: 'SOS',
-          tabBarIcon: ({ color, focused }) => (
-            // Outer wrapper: fixed size so the red pill never clips
-            <View style={styles.sosTabOuter}>
-              <View style={[
-                styles.sosTab,
-                isSOSActive && styles.sosTabActive,
-                focused && !isSOSActive && styles.sosTabFocused,
-              ]}>
+          tabBarLabel: ({ color }) => (
+            <Text style={[styles.label, { fontSize: labelSz, color }]}>SOS</Text>
+          ),
+          tabBarIcon: ({ focused }) => (
+            <View style={styles.sosWrapper}>
+              <View
+                style={[
+                  styles.sosChip,
+                  focused && !isSOSActive && styles.sosChipFocused,
+                  isSOSActive && styles.sosChipActive,
+                ]}
+              >
                 <Ionicons
                   name={isSOSActive ? 'alert-circle' : 'alert-circle-outline'}
-                  size={sosIconSize}
-                  color={isSOSActive ? '#fff' : color}
+                  size={iconSz + 2}
+                  color={isSOSActive || focused ? '#fff' : '#3D3D3D'}
                 />
-                {isSOSActive && <View style={styles.sosActiveDot} />}
               </View>
+              {isSOSActive && <View style={styles.activeDot} />}
             </View>
           ),
         }}
       />
+
+      {/* ─── Radar Tab ─── */}
       <Tabs.Screen
         name="radar"
         options={{
@@ -75,12 +87,14 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'radio' : 'radio-outline'}
-              size={iconSize}
+              size={iconSz}
               color={color}
             />
           ),
         }}
       />
+
+      {/* ─── Contacts Tab ─── */}
       <Tabs.Screen
         name="sos"
         options={{
@@ -88,14 +102,14 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'people' : 'people-outline'}
-              size={iconSize}
+              size={iconSz}
               color={color}
             />
           ),
         }}
       />
 
-      {/* ─── Hide from tab bar ─── */}
+      {/* ─── Hidden screens ─── */}
       <Tabs.Screen name="sos-map" options={{ href: null }} />
       <Tabs.Screen name="SOSMapScreen" options={{ href: null }} />
     </Tabs>
@@ -103,39 +117,46 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  // Outer wrapper gives the icon a stable, clipping-free area
-  sosTabOuter: {
+  label: {
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    marginTop: 2,
+  },
+  // SOS icon container — big enough so the chip never clips
+  sosWrapper: {
+    width: 48,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    // Enough space so the red pill + shadow never clips
-    width: 44,
-    height: 36,
   },
-  sosTab: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  sosChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    // overflow visible so shadow shows on iOS
     overflow: Platform.OS === 'ios' ? 'visible' : 'hidden',
   },
-  sosTabFocused: {
-    backgroundColor: 'rgba(255,59,48,0.12)',
+  sosChipFocused: {
+    backgroundColor: 'rgba(255,59,48,0.15)',
   },
-  sosTabActive: {
+  sosChipActive: {
     backgroundColor: '#FF3B30',
     shadowColor: '#FF3B30',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  sosActiveDot: {
+  activeDot: {
     position: 'absolute',
-    top: 2, right: 2,
-    width: 6, height: 6,
-    borderRadius: 3,
-    backgroundColor: '#fff',
+    top: 0,
+    right: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#FF3B30',
+    borderWidth: 1.5,
+    borderColor: '#0A0A0A',
   },
 });

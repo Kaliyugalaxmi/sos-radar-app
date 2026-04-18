@@ -39,7 +39,7 @@ export async function sendEmergencySMS(
   }
 }
 
-// Test SMS bhejo (single contact ko)
+// Send test SMS (single contact)
 export async function sendTestSMS(contact: Contact): Promise<boolean> {
   try {
     const isAvailable = await SMS.isAvailableAsync();

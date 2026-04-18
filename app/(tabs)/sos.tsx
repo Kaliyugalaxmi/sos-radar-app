@@ -205,7 +205,7 @@ export default function ContactsScreen() {
             <Text style={[styles.inputLabel, { fontSize: s(12), marginBottom: s(6) }]}>Name</Text>
             <TextInput
               style={[styles.input, { fontSize: s(15), padding: s(14), marginBottom: s(16) }]}
-              placeholder="Jaise: Maa, Papa, Rahul..."
+              placeholder="E.g. Mom, Dad, John..."
               placeholderTextColor="#444"
               value={name}
               onChangeText={setName}

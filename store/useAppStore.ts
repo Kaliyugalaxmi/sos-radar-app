@@ -28,7 +28,7 @@ interface AppState {
   deviceId: string | null;
   nickname: string;
 
-  // Contacts (SMS ke liye)
+  // Contacts (for SMS alerts)
   contacts: Contact[];
 
   // Emergency State (my own SOS)

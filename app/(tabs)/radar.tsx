@@ -1,5 +1,5 @@
 // app/(tabs)/radar.tsx
-// Radar Screen — Responsive + Enhanced UI
+// Radar Screen — Expanding radius logic
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -33,7 +33,12 @@ import {
 import { Coordinates, getCurrentLocation } from '../../services/location';
 import { useAppStore } from '../../store/useAppStore';
 
-// ─── Scale helper ───────────────────────────────────────────────────────────
+// ─── Radar config ─────────────────────────────────────────────────────────────
+const INITIAL_RADIUS_KM = 2;       // Phase 1: 2km
+const EXPANDED_RADIUS_KM = 10;     // Phase 2: 10km
+const EXPAND_AFTER_MS = 60_000;    // 1 minute baad expand
+
+// ─── Scale helper ─────────────────────────────────────────────────────────────
 function useScale() {
   const { width, height } = useWindowDimensions();
   const BASE = 375;
@@ -86,6 +91,14 @@ export default function RadarScreen() {
   const [helpers, setHelpers] = useState<HelperInfo[]>([]);
   const [distanceToSos, setDistanceToSos] = useState<number | null>(null);
 
+  // ─── Radar radius state ────────────────────────────────────────────────────
+  const [currentRadiusKm, setCurrentRadiusKm] = useState<number>(INITIAL_RADIUS_KM);
+  const [radarExpanded, setRadarExpanded] = useState(false);
+  const [expandCountdown, setExpandCountdown] = useState<number>(EXPAND_AFTER_MS / 1000); // seconds
+  const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sosStartTimeRef = useRef<number | null>(null);
+
   const mapRef = useRef<MapView>(null);
   const unsubscribers = useRef<(() => void)[]>([]);
   const unsubscribersForFriendsEmergencies = useRef<(() => void)[]>([]);
@@ -94,14 +107,105 @@ export default function RadarScreen() {
   const activeHelpingNickname = helpingState?.friendNickname ?? friendNickname ?? 'Friend';
   const isHelpingMode = !!activeHelpingSessionId;
 
-  // Bottom sheet height — ~22% of screen height
   const BOTTOM_SHEET_BOTTOM = s(90);
 
+  const { isSOSActive, activeSessionId } = useAppStore();
+
+  // ─── Friends filtered by current radar radius ──────────────────────────────
+  const friendsInRadar = (friends ?? []).filter((f) => {
+    const fl = friendLocations.find((l) => l.deviceId === f.deviceId);
+    if (!fl || !myLocation) return true; // location unknown — dikhao
+    const dist = haversineKm(myLocation, fl);
+    return dist <= currentRadiusKm;
+  });
+
+  // ─── Radar expand logic — SOS active hone par start ───────────────────────
+  useEffect(() => {
+    if (!isSOSActive) {
+      // SOS band hua — reset radar
+      clearExpandTimers();
+      setCurrentRadiusKm(INITIAL_RADIUS_KM);
+      setRadarExpanded(false);
+      setExpandCountdown(EXPAND_AFTER_MS / 1000);
+      return;
+    }
+
+    // SOS start hua — koi respond kiya ya nahi check karo
+    const hasHelper = helpers.length > 0;
+    if (hasHelper) {
+      // Helper aa gaya — expand ki zarurat nahi
+      clearExpandTimers();
+      return;
+    }
+
+    // Koi nahi aaya — countdown shuru karo
+    if (!sosStartTimeRef.current) {
+      sosStartTimeRef.current = Date.now();
+    }
+
+    startExpandCountdown();
+
+    return () => clearExpandTimers();
+  }, [isSOSActive]);
+
+  // Jab helper aa jaye — expand cancel karo
+  useEffect(() => {
+    if (helpers.length > 0 && isSOSActive) {
+      clearExpandTimers();
+      console.log('[Radar] Helper aa gaya, expand cancel kiya');
+    }
+  }, [helpers]);
+
+  function startExpandCountdown() {
+    clearExpandTimers();
+
+    // Countdown timer
+    countdownIntervalRef.current = setInterval(() => {
+      setExpandCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownIntervalRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Expand timer
+    expandTimerRef.current = setTimeout(() => {
+      // Check karo helpers aaye ya nahi
+      const currentHelpers = useAppStore.getState().helpingState;
+      const helpersCount = helpers.length;
+      if (helpersCount === 0) {
+        setCurrentRadiusKm(EXPANDED_RADIUS_KM);
+        setRadarExpanded(true);
+        console.log('[Radar] Koi respond nahi kiya — 10km tak expand kiya');
+        Alert.alert(
+          '📡 Radar Expanded',
+          'Koi nearby respond nahi kiya.\n10km radius tak friends ko alert bheja ja raha hai.',
+          [{ text: 'OK' }]
+        );
+      }
+    }, EXPAND_AFTER_MS);
+  }
+
+  function clearExpandTimers() {
+    if (expandTimerRef.current) {
+      clearTimeout(expandTimerRef.current);
+      expandTimerRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }
+
+  // ─── Standard effects ─────────────────────────────────────────────────────
   useEffect(() => {
     fetchMyLocation();
     return () => {
       unsubscribers.current.forEach((u) => u());
       unsubscribersForFriendsEmergencies.current.forEach((u) => u());
+      clearExpandTimers();
     };
   }, []);
 
@@ -114,7 +218,6 @@ export default function RadarScreen() {
   useEffect(() => {
     if (!isHelpingMode || !activeHelpingSessionId) return;
 
-    // Immediately fetch victim's last known location so map shows something right away
     const { get: fbGet, ref: fbRef } = require('firebase/database');
     const { rtdb: db } = require('../../config/firebase');
     fbGet(fbRef(db, `live_locations/${activeHelpingSessionId}`)).then((snap: any) => {
@@ -147,7 +250,6 @@ export default function RadarScreen() {
     return () => unsub();
   }, [activeHelpingSessionId, isHelpingMode]);
 
-  const { isSOSActive, activeSessionId } = useAppStore();
   useEffect(() => {
     if (!isSOSActive || !activeSessionId) return;
     const unsub = subscribeHelperLocations(activeSessionId, setHelpers);
@@ -251,6 +353,29 @@ export default function RadarScreen() {
           />
         )}
 
+        {/* ─── Radar radius circle ─── */}
+        {myLocation && isSOSActive && (
+          <>
+            <Circle
+              center={myLocation}
+              radius={currentRadiusKm * 1000}
+              fillColor={radarExpanded ? 'rgba(255,149,0,0.06)' : 'rgba(255,59,48,0.06)'}
+              strokeColor={radarExpanded ? 'rgba(255,149,0,0.5)' : 'rgba(255,59,48,0.4)'}
+              strokeWidth={2}
+            />
+            {/* Inner 2km circle (reference) jab expanded ho */}
+            {radarExpanded && (
+              <Circle
+                center={myLocation}
+                radius={INITIAL_RADIUS_KM * 1000}
+                fillColor="transparent"
+                strokeColor="rgba(255,59,48,0.2)"
+                strokeWidth={1}
+              />
+            )}
+          </>
+        )}
+
         {isHelpingMode && sosFriendLocation && (
           <>
             <Marker
@@ -288,7 +413,6 @@ export default function RadarScreen() {
 
       {/* ─── Top Overlay ─── */}
       <View style={[styles.topOverlay, { padding: s(16), paddingTop: s(48) }]}>
-        {/* Top Bar */}
         <View style={[styles.topBar, { marginBottom: s(10) }]}>
           <Text style={[styles.title, { fontSize: s(21) }]}>
             {isHelpingMode ? `Helping ${activeHelpingNickname}` : 'Radar'}
@@ -363,6 +487,42 @@ export default function RadarScreen() {
         </View>
       </View>
 
+      {/* ─── Radar Expand Banner (SOS active, koi nahi aaya) ─── */}
+      {isSOSActive && !radarExpanded && helpers.length === 0 && (
+        <View style={[styles.radarBanner, {
+          top: s(200), left: s(16), right: s(16),
+          borderRadius: s(14), padding: s(12),
+        }]}>
+          <Ionicons name="radio-outline" size={s(16)} color="#FF3B30" />
+          <View style={{ flex: 1, marginLeft: s(8) }}>
+            <Text style={[styles.radarBannerTitle, { fontSize: s(13) }]}>
+              📡 2km mein friends ko alert bheja
+            </Text>
+            <Text style={[styles.radarBannerSub, { fontSize: s(11) }]}>
+              Koi respond nahi kiya toh {expandCountdown}s mein 10km tak expand hoga
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ─── Radar Expanded Banner ─── */}
+      {isSOSActive && radarExpanded && (
+        <View style={[styles.radarExpandedBanner, {
+          top: s(200), left: s(16), right: s(16),
+          borderRadius: s(14), padding: s(12),
+        }]}>
+          <Ionicons name="radio-outline" size={s(16)} color="#FF9500" />
+          <View style={{ flex: 1, marginLeft: s(8) }}>
+            <Text style={[styles.radarExpandedTitle, { fontSize: s(13) }]}>
+              📡 Radar 10km tak expand ho gaya!
+            </Text>
+            <Text style={[styles.radarExpandedSub, { fontSize: s(11) }]}>
+              Nearby respond nahi kiya — aur friends ko alert bheja
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* ─── Helper Mode Banner ─── */}
       {isHelpingMode && (
         <View style={[styles.helpingBanner, {
@@ -413,17 +573,21 @@ export default function RadarScreen() {
         }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s(10) }}>
             <Text style={[styles.bottomTitle, { fontSize: s(14) }]}>
-              Friends{(friends ?? []).length > 0 ? ` (${(friends ?? []).length})` : ''}
+              Friends{friendsInRadar.length > 0 ? ` (${friendsInRadar.length}${currentRadiusKm === INITIAL_RADIUS_KM ? ' · 2km' : ' · 10km'})` : ''}
             </Text>
             <TouchableOpacity onPress={() => setShowAddFriend(true)}>
               <Text style={[{ color: '#FF3B30', fontSize: s(12), fontWeight: '700' }]}>+ Add</Text>
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {(friends ?? []).length === 0 ? (
-              <Text style={[styles.emptyText, { fontSize: s(13) }]}>No friends yet — tap "+ Add" to connect</Text>
+            {friendsInRadar.length === 0 ? (
+              <Text style={[styles.emptyText, { fontSize: s(13) }]}>
+                {(friends ?? []).length === 0
+                  ? 'No friends yet — tap "+ Add" to connect'
+                  : `${currentRadiusKm}km mein koi friend nahi`}
+              </Text>
             ) : (
-              (friends ?? []).map((f, idx) => (
+              friendsInRadar.map((f, idx) => (
                 <View
                   key={f.deviceId ?? `friend_${idx}`}
                   style={[styles.friendChip, f.isInEmergency && styles.friendChipEmergency, { borderRadius: s(20), paddingHorizontal: s(12), paddingVertical: s(8), marginRight: s(8) }]}
@@ -555,6 +719,29 @@ const styles = StyleSheet.create({
   },
   smallBtnText: { color: '#aaa', fontWeight: '600' },
 
+  // Radar banners
+  radarBanner: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(10,0,0,0.88)',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  radarBannerTitle: { color: '#FF3B30', fontWeight: '700' },
+  radarBannerSub: { color: '#888', marginTop: 2 },
+
+  radarExpandedBanner: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(12,8,0,0.90)',
+    borderWidth: 1,
+    borderColor: '#FF9500',
+  },
+  radarExpandedTitle: { color: '#FF9500', fontWeight: '700' },
+  radarExpandedSub: { color: '#888', marginTop: 2 },
+
   sosFriendMarker: {
     backgroundColor: '#FF3B30', borderRadius: 20, padding: 8,
     borderWidth: 2, borderColor: '#fff',
@@ -565,7 +752,6 @@ const styles = StyleSheet.create({
   },
   markerEmoji: { fontSize: 18 },
 
-  // Helper banner
   helpingBanner: {
     position: 'absolute',
     backgroundColor: 'rgba(10,30,10,0.96)',
@@ -585,7 +771,6 @@ const styles = StyleSheet.create({
   },
   openMapBtnText: { color: '#30D158', fontWeight: '700' },
 
-  // Bottom sheet
   bottomSheet: {
     position: 'absolute',
     backgroundColor: 'rgba(8,8,8,0.92)',
@@ -603,7 +788,6 @@ const styles = StyleSheet.create({
   dotEmergency: { backgroundColor: '#FF3B30' },
   friendChipText: { color: '#ccc', fontWeight: '600' },
 
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: '#0e0e0e',
