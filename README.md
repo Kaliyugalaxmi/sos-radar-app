@@ -46,4 +46,32 @@ To create a fast, intelligent, and reliable emergency response system that prior
    - Nearby trusted friends (radar system)  
 3. If a user accepts (“I’m coming”)  
 4. Both users enter live location sharing mode  
-5. Continuous tracking continues until safety is restored  
+5. Continuous tracking continues until safety is restored
+
+📸 Screenshots
+<table>
+  <tr>
+    <td align="center">
+      <img src="home.jpeg" width="220" alt="SOS Home Screen" />
+      <br/>
+      <b>SOS Home</b>
+      <br/>
+      <sub>Hold-to-activate SOS · Location display · Contacts, Radar & 112 shortcuts</sub>
+    </td>
+    <td align="center">
+      <img src="radar.jpeg" width="220" alt="Radar Screen" />
+      <br/>
+      <b>Radar</b>
+      <br/>
+      <sub>Live map · Nearby friends within 2km · Device ID sharing</sub>
+    </td>
+    <td align="center">
+      <img src="contacts.jpeg" width="220" alt="Emergency Contacts Screen" />
+      <br/>
+      <b>Emergency Contacts</b>
+      <br/>
+      <sub>Add / manage contacts · SMS alert on SOS trigger</sub>
+    </td>
+  </tr>
+</table>
+
