@@ -6,16 +6,20 @@
 
 ## 📱 Overview
 
-SOS Radar enables fast, reliable communication during emergencies through a **trusted, closed safety network**. Users build their network via a friend request system (device ID-based, upgradeable to authentication).
-
-When an SOS is triggered, alerts are sent **in parallel** to:
-- 📞 Selected emergency contacts from the phonebook
-- 📡 Nearby trusted friends detected via a radar-based geolocation system
-
-If a nearby trusted friend responds with **"I'm coming"**, both users enter **real-time mutual location tracking** until the situation is resolved.
+The app allows users to build a trusted network using a **friend request system (device ID-based, upgradeable to authentication)**.
+When an SOS is triggered, the system sends alerts **in parallel** to:
+- 📞 Selected emergency contacts 
+- 📡 Nearby trusted friends using a radar-based geolocation system  
+If a nearby trusted friend responds with “I’m coming”, both users are connected through **real-time mutual location tracking** until the situation is resolved.
+This ensures help is always reachable through both **local proximity support and emergency contact backup**, improving response time in critical situations.
 
 ---
 
+## 🎯 Purpose
+
+To create a fast, intelligent, and reliable emergency response system that prioritizes trusted contacts and nearby connections, ensuring immediate assistance during critical situations.
+
+---
 ## 📸 Screenshots
 
 <table>
@@ -48,17 +52,15 @@ If a nearby trusted friend responds with **"I'm coming"**, both users enter **re
 
 ## 🚨 Key Features
 
-| Feature | Description |
-|---|---|
-| 🔴 Hold-to-activate SOS | 3-second countdown prevents accidental triggers — sends SMS + live location |
-| 📍 Live Location Display | Shows current city/region on home screen with refresh |
-| ✅ Safe Status Indicator | Green "Safe" badge visible on home screen at all times |
-| 👥 Emergency Contacts | Add phonebook contacts who receive SMS alerts on SOS |
-| 📡 Radar — Nearby Friends | Google Maps view showing trusted friends within 2km radius |
-| 🆔 Device ID Network | Unique device ID used to add trusted friends (no account required) |
-| 📢 112 Quick Call | One-tap emergency services call directly from the home screen |
-| 🔥 Firebase Real-time DB | Instant location and alert updates across all connected devices |
-| 🔐 Closed Network | Only verified friends appear on radar — no unknown users |
+- 🔴 One-tap SOS emergency alert system  
+- 👥 Trusted network via friend requests (device ID-based, upgradeable to authentication)  
+- 📍 Real-time geolocation tracking and sharing  
+- 📡 Radar-based proximity detection of nearby trusted friends  
+- 📢 Parallel alert system (phonebook contacts + nearby trusted users)  
+- 🤝 “I’m coming” response system for helpers  
+- 🧭 Live mutual location tracking until assistance arrives  
+- 🔥 Firebase real-time database for instant updates  
+- 🔐 Secure, closed-network safety system (no unknown users)
 
 ---
 
