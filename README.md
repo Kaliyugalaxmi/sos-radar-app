@@ -8,9 +8,11 @@
 
 The app allows users to build a trusted network using a **friend request system (device ID-based, upgradeable to authentication)**.
 When an SOS is triggered, the system sends alerts **in parallel** to:
-- 📞 Selected emergency contacts 
-- 📡 Nearby trusted friends using a radar-based geolocation system  
-If a nearby trusted friend responds with “I’m coming”, both users are connected through **real-time mutual location tracking** until the situation is resolved.
+
+- 📞 Selected emergency contacts
+- 📡 Nearby trusted friends using a radar-based geolocation system
+
+If a nearby trusted friend responds with **"I'm coming"**, both users are connected through **real-time mutual location tracking** until the situation is resolved.
 This ensures help is always reachable through both **local proximity support and emergency contact backup**, improving response time in critical situations.
 
 ---
@@ -20,6 +22,7 @@ This ensures help is always reachable through both **local proximity support and
 To create a fast, intelligent, and reliable emergency response system that prioritizes trusted contacts and nearby connections, ensuring immediate assistance during critical situations.
 
 ---
+
 ## 📸 Screenshots
 
 <table>
@@ -52,14 +55,14 @@ To create a fast, intelligent, and reliable emergency response system that prior
 
 ## 🚨 Key Features
 
-- 🔴 One-tap SOS emergency alert system  
-- 👥 Trusted network via friend requests (device ID-based, upgradeable to authentication)  
-- 📍 Real-time geolocation tracking and sharing  
-- 📡 Radar-based proximity detection of nearby trusted friends  
-- 📢 Parallel alert system (phonebook contacts + nearby trusted users)  
-- 🤝 “I’m coming” response system for helpers  
-- 🧭 Live mutual location tracking until assistance arrives  
-- 🔥 Firebase real-time database for instant updates  
+- 🔴 One-tap SOS emergency alert system
+- 👥 Trusted network via friend requests (device ID-based, upgradeable to authentication)
+- 📍 Real-time geolocation tracking and sharing
+- 📡 Radar-based proximity detection of nearby trusted friends
+- 📢 Parallel alert system (phonebook contacts + nearby trusted users)
+- 🤝 "I'm coming" response system for helpers
+- 🧭 Live mutual location tracking until assistance arrives
+- 🔥 Firebase real-time database for instant updates
 - 🔐 Secure, closed-network safety system (no unknown users)
 
 ---
@@ -85,22 +88,28 @@ To create a fast, intelligent, and reliable emergency response system that prior
         │
         ▼
 6. User marks themselves Safe → session ends
+```
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - Node.js (v18+)
-- Expo Go app installed on your phone ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779))
+- **Expo Go** app installed on your phone → [Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779)
 - Both devices (dev machine + phone) on the **same Wi-Fi network**
 
 ### Installation
 
-````bash
+```bash
 git clone https://github.com/your-username/sos-radar-app.git
 cd sos-radar-app
 npm install
 npx expo start
-````
+```
+
+---
 
 ## 📱 Running on Device (Expo Go)
 
@@ -109,22 +118,28 @@ npx expo start
 1. Run `npx expo start` in the terminal
 2. A QR code will appear in the terminal or browser (`localhost:8081`)
 3. Open **Expo Go** on your Android phone → tap **"Scan QR Code"**
-4. Scan the QR code — the app will load on your device
+4. Scan the QR code — the app will load on your device ✅
+
+---
 
 ## 🔗 Testing Two-Device Features (Radar / SOS)
 
 To test real-time features like SOS alerts and radar tracking across two phones:
 
 - Both phones must be on the **same Wi-Fi network**
-- Both must have the app open via Expo Go
+- Both must have the app open via **Expo Go**
 - Use different **Device IDs** (auto-generated per device)
 - Firebase Realtime Database handles sync instantly across both devices
 
+> 💡 **Tip:** Share your Device ID from the Radar screen to add each other as trusted friends and test the full SOS → "I'm Coming" → Live Map flow.
+
+---
+
 ## 🛠️ Environment Setup
 
-Create a `firebaseConfig.js` in the root:
+Create a `firebaseConfig.js` in the project root:
 
-````js
+```js
 export const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "YOUR_PROJECT.firebaseapp.com",
@@ -134,5 +149,12 @@ export const firebaseConfig = {
   messagingSenderId: "YOUR_SENDER_ID",
   appId: "YOUR_APP_ID"
 };
-````
+```
 
+> 🔒 **Never commit this file.** Add `firebaseConfig.js` to your `.gitignore` before pushing to GitHub.
+
+---
+
+## 🧑‍💻 Built By
+
+**Syntax Squad** — MCA Students, Mumbai
