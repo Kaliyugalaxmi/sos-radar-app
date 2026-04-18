@@ -86,4 +86,53 @@ To create a fast, intelligent, and reliable emergency response system that prior
         ▼
 6. User marks themselves Safe → session ends
 
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v18+)
+- Expo Go app installed on your phone ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779))
+- Both devices (dev machine + phone) on the **same Wi-Fi network**
+
+### Installation
+
+````bash
+git clone https://github.com/your-username/sos-radar-app.git
+cd sos-radar-app
+npm install
+npx expo start
+````
+
+## 📱 Running on Device (Expo Go)
+
+> ⚠️ **Important:** Your phone and laptop must be connected to the **same Wi-Fi / LAN network** for Expo Go to work.
+
+1. Run `npx expo start` in the terminal
+2. A QR code will appear in the terminal or browser (`localhost:8081`)
+3. Open **Expo Go** on your Android phone → tap **"Scan QR Code"**
+4. Scan the QR code — the app will load on your device
+
+## 🔗 Testing Two-Device Features (Radar / SOS)
+
+To test real-time features like SOS alerts and radar tracking across two phones:
+
+- Both phones must be on the **same Wi-Fi network**
+- Both must have the app open via Expo Go
+- Use different **Device IDs** (auto-generated per device)
+- Firebase Realtime Database handles sync instantly across both devices
+
+## 🛠️ Environment Setup
+
+Create a `firebaseConfig.js` in the root:
+
+````js
+export const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+````
 
