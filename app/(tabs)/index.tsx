@@ -1,5 +1,3 @@
-// app/(tabs)/index.tsx
-// SOS Main Screen — Enhanced UI + Custom Modals + Fast2SMS
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -33,20 +31,26 @@ import {
 import { sendEmergencySMS } from '../../services/sms';
 import { useAppStore } from '../../store/useAppStore';
 
-// ─── Responsive scale ─────────────────────────────────────────────────────────
 function useScale() {
   const { width, height } = useWindowDimensions();
-  const scale = Math.min(Math.max(width / 375, 0.78), 1.3);
-  const vs = Math.min(Math.max(height / 812, 0.75), 1.3);
+  const scale = Math.min(Math.max(width / 375, 0.65), 1.4);
+  const vs = Math.min(Math.max(height / 812, 0.7), 1.3);
   return {
     width,
     height,
     s: (n: number) => Math.round(n * scale),
     vs: (n: number) => Math.round(n * vs),
+    // Percentage-based utilities
+    percentWidth: (percent: number) => Math.round((width * percent) / 100),
+    percentHeight: (percent: number) => Math.round((height * percent) / 100),
+    // Dynamic sizing with min/max
+    dynamicSize: (baseSize: number, minSize: number, maxSize: number) => {
+      const scaledSize = baseSize * scale;
+      return Math.min(Math.max(scaledSize, minSize), maxSize);
+    },
   };
 }
 
-// ─── Custom Alert Modal ───────────────────────────────────────────────────────
 type AlertButton = { label: string; onPress?: () => void; variant?: 'default' | 'destructive' | 'primary' };
 
 interface CustomAlertProps {
@@ -118,7 +122,6 @@ function CustomAlert({ visible, icon, iconColor = '#FF3B30', title, message, but
   );
 }
 
-// ─── Toast notification ───────────────────────────────────────────────────────
 interface ToastProps { visible: boolean; message: string; type?: 'success' | 'error' | 'info' }
 
 function Toast({ visible, message, type = 'info' }: ToastProps) {
@@ -143,10 +146,9 @@ function Toast({ visible, message, type = 'info' }: ToastProps) {
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function SOSScreen() {
   const { deviceId, contacts, isSOSActive, activeSessionId, setSOSActive } = useAppStore();
-  const { width, height, s } = useScale();
+  const { width, height, s, vs, percentWidth, percentHeight, dynamicSize } = useScale();
 
   const [countdown, setCountdown] = useState<number | null>(null);
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
@@ -169,10 +171,11 @@ export default function SOSScreen() {
   const stopWatchingLocation = useRef<(() => void) | null>(null);
   const stopWatchingHelpers = useRef<(() => void) | null>(null);
 
-  const SOS_BTN = Math.min(Math.max(width * 0.42, 148), 210);
-  const RING1 = SOS_BTN + 40;
-  const RING2 = SOS_BTN + 78;
-  const SOS_AREA_H = Math.min(RING2 + 32, height * 0.38);
+  // Responsive SOS button sizing without hardcoded pixels
+  const SOS_BTN = dynamicSize(140, 100, 220);
+  const RING1 = SOS_BTN + vs(40);
+  const RING2 = SOS_BTN + vs(78);
+  const SOS_AREA_H = Math.max(RING2 + vs(40), percentHeight(35));
 
   function showAlert(props: Omit<CustomAlertProps, 'onClose' | 'visible'>) {
     setAlertProps(props);
@@ -231,7 +234,7 @@ export default function SOSScreen() {
     if (coords) {
       setCurrentLocation(coords);
       const addr = await getAddressFromCoords(coords);
-      setAddress(addr);
+      setAddress(addr.trim().replace(/^,\s*/, ''));
     } else {
       setAddress('Location access not granted');
     }
@@ -320,7 +323,7 @@ export default function SOSScreen() {
       stopWatchingLocation.current = watchLocation(async (coords) => {
         setCurrentLocation(coords);
         const newAddr = await getAddressFromCoords(coords);
-        setAddress(newAddr);
+        setAddress(newAddr.trim().replace(/^,\s*/, ''));
         await updateLiveLocation(sessionId, coords);
       });
 
@@ -370,7 +373,7 @@ export default function SOSScreen() {
   return (
     <SafeAreaView style={styles.container}>
       {/* Toast */}
-      <Toast visible={!!toast} message={toast?.message ?? ''} type={toast?.type} />
+      {!!toast && <Toast visible={!!toast} message={toast?.message ?? ''} type={toast?.type} />}
 
       {/* Custom Alert */}
       {alertProps && (
@@ -382,14 +385,16 @@ export default function SOSScreen() {
       )}
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingHorizontal: s(18), paddingTop: s(16), paddingBottom: s(32) }]}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        nestedScrollEnabled={false}
       >
         {/* ─── Header ─── */}
-        <View style={[styles.header, { marginBottom: s(14) }]}>
-          <View style={{ flex: 1, marginRight: s(12) }}>
-            <Text style={[styles.headerTitle, { fontSize: s(26) }]}>SOS Safety</Text>
-            <Text style={[styles.headerSub, { fontSize: s(12) }]}>Emergency Response</Text>
+        <View style={styles.headerContainer}>
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle}>SOS Safety</Text>
+            <Text style={styles.headerSub}>Emergency Response</Text>
           </View>
           <View style={[
             styles.statusBadge,
@@ -398,7 +403,6 @@ export default function SOSScreen() {
             <View style={[styles.statusDot, isSOSActive ? styles.dotActive : styles.dotIdle]} />
             <Text style={[
               styles.statusText,
-              { fontSize: s(11) },
               isSOSActive && styles.statusTextActive,
             ]}>
               {isSOSActive ? 'ALERT ACTIVE' : 'Safe'}
@@ -408,41 +412,39 @@ export default function SOSScreen() {
 
         {/* ─── Location Card ─── */}
         <TouchableOpacity
-          style={[styles.locationCard, { padding: s(12), marginBottom: s(24) }]}
+          style={styles.locationCard}
           onPress={fetchLocation}
           activeOpacity={0.8}
         >
-          <View style={styles.locationIconWrap}>
+          <View style={styles.locationIcon}>
             <Ionicons name="location" size={s(15)} color="#FF3B30" />
           </View>
-          <Text style={[styles.locationText, { fontSize: s(13) }]} numberOfLines={2}>
+          <Text style={styles.locationText} numberOfLines={2}>
             {isFetchingLocation ? 'Searching...' : address}
           </Text>
-          <View style={{ padding: s(6) }}>
-            <Ionicons
-              name={isFetchingLocation ? 'sync' : 'refresh'}
-              size={s(14)}
-              color={isFetchingLocation ? '#FF9500' : '#555'}
-            />
-          </View>
+          <Ionicons
+            name={isFetchingLocation ? 'sync' : 'refresh'}
+            size={s(14)}
+            color={isFetchingLocation ? '#FF9500' : '#555'}
+          />
         </TouchableOpacity>
 
         {/* ─── SOS Button ─── */}
-        <View style={[styles.sosArea, { height: SOS_AREA_H, marginBottom: s(16) }]}>
+        <View style={[styles.sosArea, { height: SOS_AREA_H }]}>
           {isSOSActive && (
             <Animated.View style={[
               styles.pulseRing,
-              { width: RING2, height: RING2, borderRadius: RING2 / 2, transform: [{ scale: pulseAnim2 }], opacity: 0.3 },
+              { width: RING2, height: RING2, borderRadius: RING2 / 2, transform: [{ scale: pulseAnim2 }] },
             ]} />
           )}
           {isSOSActive && (
             <Animated.View style={[
               styles.pulseRing,
-              { width: RING1, height: RING1, borderRadius: RING1 / 2, transform: [{ scale: pulseAnim }], borderWidth: 2 },
+              { width: RING1, height: RING1, borderRadius: RING1 / 2, transform: [{ scale: pulseAnim }] },
             ]} />
           )}
 
-          <Animated.View style={{ transform: [{ scale: btnScale }] }}>
+          <Animated.View style={{ transform: [{ scale: btnScale }], width: SOS_BTN, height: SOS_BTN }}>
             <TouchableOpacity
               onPress={isCountingDown ? cancelCountdown : handleSOSPress}
               onPressIn={pressIn}
@@ -450,28 +452,28 @@ export default function SOSScreen() {
               activeOpacity={1}
               style={[
                 styles.sosButton,
-                { width: SOS_BTN, height: SOS_BTN, borderRadius: SOS_BTN / 2 },
+                { borderRadius: SOS_BTN / 2 },
                 isSOSActive && styles.sosButtonActive,
                 isCountingDown && styles.sosButtonCounting,
               ]}
             >
               {isCountingDown ? (
                 <View style={styles.sosInner}>
-                  <Text style={[styles.countdownNum, { fontSize: s(52) }]}>{countdown}</Text>
-                  <Text style={[styles.countdownHint, { fontSize: s(11) }]}>Tap to cancel</Text>
+                  <Text style={styles.countdownNum}>{countdown}</Text>
+                  <Text style={styles.countdownHint}>Tap to cancel</Text>
                 </View>
               ) : (
                 <View style={styles.sosInner}>
                   <Ionicons
                     name={isSOSActive ? 'stop-circle' : 'alert-circle'}
-                    size={s(42)}
+                    size={s(40)}
                     color="#fff"
                   />
-                  <Text style={[styles.sosText, { fontSize: s(20), letterSpacing: s(5) }]}>
+                  <Text style={styles.sosText}>
                     {isSOSActive ? 'STOP' : 'SOS'}
                   </Text>
                   {!isSOSActive && (
-                    <Text style={[styles.sosHint, { fontSize: s(11) }]}>Hold to activate</Text>
+                    <Text style={styles.sosHint}>Hold to activate</Text>
                   )}
                 </View>
               )}
@@ -481,37 +483,37 @@ export default function SOSScreen() {
 
         {/* ─── Info row ─── */}
         {!isSOSActive && !isCountingDown && (
-          <Text style={[styles.infoText, { fontSize: s(13), marginBottom: s(22) }]}>
+          <Text style={styles.infoText}>
             Press → 3 second countdown → SMS + live{'\n'}location sent to {contacts.length} contact{contacts.length !== 1 ? 's' : ''}
           </Text>
         )}
 
         {/* ─── Active SOS Card ─── */}
         {isSOSActive && (
-          <View style={[styles.activeCard, { padding: s(14), marginBottom: s(22) }]}>
+          <View style={styles.activeCard}>
             <View style={styles.activeHeader}>
               <View style={styles.activePulseDot} />
-              <Text style={[styles.activeTitle, { fontSize: s(14) }]}>🚨 Alert Active</Text>
+              <Text style={styles.activeTitle}>🚨 Alert Active</Text>
             </View>
             <View style={styles.divider} />
-            <Text style={[styles.activeItem, { fontSize: s(12) }]}>• Location updates every 5 seconds</Text>
-            <Text style={[styles.activeItem, { fontSize: s(12) }]}>• SMS sent via Fast2SMS to {contacts.length} contacts</Text>
-            <Text style={[styles.activeItem, { fontSize: s(12) }]}>• Friends visible on the radar</Text>
+            <Text style={styles.activeItem}>• Location updates every 5 seconds</Text>
+            <Text style={styles.activeItem}>• SMS sent to {contacts.length} contacts</Text>
+            <Text style={styles.activeItem}>• Friends visible on the radar</Text>
 
             {helpers.length > 0 ? (
               <View style={styles.helpersSection}>
-                <Text style={[styles.helperTitle, { fontSize: s(12) }]}>
+                <Text style={styles.helperTitle}>
                   🏃 {helpers.length} {helpers.length === 1 ? 'friend is' : 'friends are'} coming!
                 </Text>
                 {helpers.map((h) => (
                   <View key={h.deviceId} style={styles.helperRow}>
                     <View style={styles.helperDot} />
-                    <Text style={[styles.helperName, { fontSize: s(12) }]}>{h.nickname}</Text>
-                    <Text style={[styles.helperEta, { fontSize: s(11) }]}>On the way →</Text>
+                    <Text style={styles.helperName}>{h.nickname}</Text>
+                    <Text style={styles.helperEta}>On the way →</Text>
                   </View>
                 ))}
                 <TouchableOpacity
-                  style={[styles.mapBtn, { padding: s(9) }]}
+                  style={styles.mapBtn}
                   onPress={() => router.push({
                     pathname: '/sos-map',
                     params: {
@@ -523,11 +525,11 @@ export default function SOSScreen() {
                   })}
                 >
                   <Ionicons name="map" size={s(13)} color="#fff" />
-                  <Text style={[styles.mapBtnText, { fontSize: s(12) }]}>View on map</Text>
+                  <Text style={styles.mapBtnText}>View on map</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <Text style={[styles.activeItem, { fontSize: s(12) }]}>• Waiting for friends to respond...</Text>
+              <Text style={styles.activeItem}>• Waiting for friends to respond...</Text>
             )}
           </View>
         )}
@@ -535,39 +537,39 @@ export default function SOSScreen() {
         {/* ─── Quick Actions ─── */}
         <View style={styles.quickActions}>
           <TouchableOpacity
-            style={[styles.actionCard, { padding: s(14) }]}
+            style={styles.actionCard}
             onPress={() => router.push('/(tabs)/sos')}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,59,48,0.14)', borderRadius: s(10), padding: s(7) }]}>
-              <Ionicons name="people" size={s(19)} color="#FF3B30" />
+            <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,59,48,0.14)' }]}>
+              <Ionicons name="people" size={s(18)} color="#FF3B30" />
             </View>
-            <Text style={[styles.actionLabel, { fontSize: s(10) }]}>Contacts</Text>
-            <Text style={[styles.actionValue, { fontSize: s(16), color: '#FF3B30' }]}>{contacts.length}</Text>
+            <Text style={styles.actionLabel}>Contacts</Text>
+            <Text style={[styles.actionValue, { color: '#FF3B30' }]}>{contacts.length}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionCard, { padding: s(14) }]}
+            style={styles.actionCard}
             onPress={() => router.push('/(tabs)/radar')}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,149,0,0.14)', borderRadius: s(10), padding: s(7) }]}>
-              <Ionicons name="radio" size={s(19)} color="#FF9500" />
+            <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,149,0,0.14)' }]}>
+              <Ionicons name="radio" size={s(18)} color="#FF9500" />
             </View>
-            <Text style={[styles.actionLabel, { fontSize: s(10) }]}>Radar</Text>
-            <Text style={[styles.actionValue, { fontSize: s(16), color: '#FF9500' }]}>📡</Text>
+            <Text style={styles.actionLabel}>Radar</Text>
+            <Text style={[styles.actionValue, { color: '#FF9500' }]}>📡</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionCard, { padding: s(14) }]}
+            style={styles.actionCard}
             onPress={() => Linking.openURL('tel:112')}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIcon, { backgroundColor: 'rgba(48,209,88,0.14)', borderRadius: s(10), padding: s(7) }]}>
-              <Ionicons name="call" size={s(19)} color="#30D158" />
+            <View style={[styles.actionIcon, { backgroundColor: 'rgba(48,209,88,0.14)' }]}>
+              <Ionicons name="call" size={s(18)} color="#30D158" />
             </View>
-            <Text style={[styles.actionLabel, { fontSize: s(10) }]}>112 Call</Text>
-            <Text style={[styles.actionValue, { fontSize: s(16), color: '#30D158' }]}>📞</Text>
+            <Text style={styles.actionLabel}>112 Call</Text>
+            <Text style={[styles.actionValue, { color: '#30D158' }]}>📞</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -577,57 +579,68 @@ export default function SOSScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#080808' },
-  scroll: { flexGrow: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: '4%', paddingTop: '2%', paddingBottom: '2%' },
 
   // ─── Header ───────────────────────────────────────────
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontWeight: '800' },
-  headerSub: { color: '#555', marginTop: 2, fontWeight: '500' },
+  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2%', marginTop: '1%', gap: '2%', width: '100%' },
+  headerContent: { flex: 1 },
+  headerTitle: { color: '#fff', fontWeight: '900', fontSize: 28, letterSpacing: -0.8 },
+  headerSub: { color: '#666', marginTop: 4, fontWeight: '600', fontSize: 12, letterSpacing: 0.3 },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: '3%',
+    paddingVertical: '1.5%',
+    borderRadius: 24,
     gap: 6,
-    backgroundColor: '#141414',
-    borderWidth: 1,
-    borderColor: '#232323',
+    backgroundColor: '#0F0F0F',
+    borderWidth: 1.5,
+    borderColor: '#222',
     flexShrink: 0,
   },
-  statusActive: { backgroundColor: '#280606', borderColor: '#FF3B30' },
-  statusIdle: {},
-  statusDot: { width: 7, height: 7, borderRadius: 3.5, flexShrink: 0 },
+  statusActive: { backgroundColor: '#3D0A0A', borderColor: '#FF5244' },
+  statusIdle: { borderColor: '#1A3A1A' },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#30D158' },
   dotActive: { backgroundColor: '#FF3B30' },
   dotIdle: { backgroundColor: '#30D158' },
-  statusText: { color: '#555', fontWeight: '700' },
-  statusTextActive: { color: '#FF3B30' },
+  statusText: { color: '#888', fontWeight: '800', fontSize: 11, letterSpacing: 0.5 },
+  statusTextActive: { color: '#FF5244' },
 
   // ─── Location Card ────────────────────────────────────
   locationCard: {
     backgroundColor: '#111',
-    borderRadius: 14,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: '2%',
     borderWidth: 1,
-    borderColor: '#1E1E1E',
+    borderColor: '#1F1F1F',
+    marginTop: '2%',
+    marginBottom: '2%',
+    paddingVertical: '3%',
+    paddingHorizontal: '3%',
+    width: '100%',
   },
-  locationIconWrap: {
-    backgroundColor: 'rgba(255,59,48,0.12)',
-    borderRadius: 8,
-    padding: 6,
+  locationIcon: {
+    backgroundColor: 'rgba(255,59,48,0.16)',
+    borderRadius: 10,
+    padding: 8,
     flexShrink: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,48,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  locationText: { flex: 1, color: '#bbb', lineHeight: 18 },
+  locationText: { flex: 1, color: '#ddd', lineHeight: 20, fontSize: 13, fontWeight: '500' },
 
   // ─── SOS Area ─────────────────────────────────────────
-  sosArea: { alignItems: 'center', justifyContent: 'center' },
+  sosArea: { alignItems: 'center', justifyContent: 'center', marginVertical: '2%', width: '100%' },
   pulseRing: {
     position: 'absolute',
     backgroundColor: 'transparent',
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: '#FF3B30',
+    opacity: 0.4,
   },
   sosButton: {
     alignItems: 'center',
@@ -635,91 +648,106 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30',
     shadowColor: '#FF3B30',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 30,
-    elevation: 18,
+    shadowOpacity: 0.7,
+    shadowRadius: 40,
+    elevation: 20,
     borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.15)',
+    width: '100%',
+    height: '100%',
+    aspectRatio: 1,
   },
-  sosButtonActive: { backgroundColor: '#CC0F0F', borderColor: 'rgba(255,255,255,0.18)' },
-  sosButtonCounting: { backgroundColor: '#FF9500', shadowColor: '#FF9500', borderColor: 'rgba(255,255,255,0.18)' },
-  sosInner: { alignItems: 'center', gap: 4 },
-  sosText: { color: '#fff', fontWeight: '900' },
-  sosHint: { color: 'rgba(255,255,255,0.6)' },
-  countdownNum: { color: '#fff', fontWeight: '900', lineHeight: 60 },
-  countdownHint: { color: 'rgba(255,255,255,0.7)' },
+  sosButtonActive: { backgroundColor: '#D42F2F', borderColor: 'rgba(255,255,255,0.2)', shadowOpacity: 0.8 },
+  sosButtonCounting: { backgroundColor: '#FF9500', shadowColor: '#FF9500', borderColor: 'rgba(255,255,255,0.2)', shadowOpacity: 0.7 },
+  sosInner: { alignItems: 'center', gap: 4, justifyContent: 'center' },
+  sosText: { color: '#fff', fontWeight: '900', letterSpacing: 1.5, fontSize: 18 },
+  sosHint: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '500' },
+  countdownNum: { color: '#fff', fontWeight: '900', fontSize: 48, lineHeight: 50 },
+  countdownHint: { color: 'rgba(255,255,255,0.75)', fontWeight: '500', fontSize: 10 },
 
   // ─── Info text ────────────────────────────────────────
-  infoText: { color: '#444', textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
+  infoText: { color: '#555', textAlign: 'center', lineHeight: 22, paddingHorizontal: '4%', marginVertical: '3%', fontSize: 12, fontWeight: '500', width: '100%' },
 
   // ─── Active Card ──────────────────────────────────────
   activeCard: {
     backgroundColor: '#0E0303',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-    gap: 6,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#FF4A3A',
+    gap: 8,
+    marginVertical: '3%',
+    paddingHorizontal: '4%',
+    paddingVertical: '4%',
+    width: '100%',
   },
   activeHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   activePulseDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30' },
-  activeTitle: { color: '#FF3B30', fontWeight: '700' },
-  divider: { height: 1, backgroundColor: 'rgba(255,59,48,0.15)', marginVertical: 2 },
-  activeItem: { color: '#ccc', lineHeight: 20 },
-  helpersSection: { marginTop: 6, borderTopWidth: 1, borderTopColor: 'rgba(255,59,48,0.15)', paddingTop: 10, gap: 6 },
-  helperTitle: { color: '#FF9500', fontWeight: '700' },
-  helperRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  helperDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#30D158', flexShrink: 0 },
-  helperName: { color: '#fff', fontWeight: '600', flex: 1 },
-  helperEta: { color: '#30D158' },
+  activeTitle: { color: '#FF5244', fontWeight: '800', fontSize: 14 },
+  divider: { height: 1.5, backgroundColor: 'rgba(255,59,48,0.18)', marginVertical: '2%', width: '100%' },
+  activeItem: { color: '#ccc', lineHeight: 21, fontSize: 12, fontWeight: '500' },
+  helpersSection: { marginTop: '3%', borderTopWidth: 1, borderTopColor: 'rgba(255,59,48,0.18)', paddingTop: 12, gap: 6 },
+  helperTitle: { color: '#FF9500', fontWeight: '800', fontSize: 12 },
+  helperRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  helperDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#30D158' },
+  helperName: { color: '#fff', fontWeight: '600', flex: 1, fontSize: 12 },
+  helperEta: { color: '#30D158', fontSize: 11, fontWeight: '600' },
   mapBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
     backgroundColor: '#FF3B30',
-    borderRadius: 10,
+    borderRadius: 12,
     alignSelf: 'flex-start',
-    marginTop: 4,
+    marginTop: '3%',
+    paddingHorizontal: '3%',
+    paddingVertical: '2.5%',
   },
-  mapBtnText: { color: '#fff', fontWeight: '700' },
+  mapBtnText: { color: '#fff', fontWeight: '800', fontSize: 11, letterSpacing: 0.3 },
 
   // ─── Quick Actions ────────────────────────────────────
-  quickActions: { flexDirection: 'row', gap: 8 },
+  quickActions: { flexDirection: 'row', gap: '2%', marginTop: '5%', marginBottom: '2%', width: '100%' },
   actionCard: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: '#111',
-    borderRadius: 14,
+    backgroundColor: '#131313',
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
+    borderColor: '#1E1E1E',
+    paddingVertical: '4%',
+    paddingHorizontal: '2%',
   },
-  actionIcon: {},
-  actionLabel: { color: '#666', fontWeight: '600' },
-  actionValue: { fontWeight: '800' },
+  actionIcon: { borderRadius: 12, padding: 8, justifyContent: 'center', alignItems: 'center' },
+  actionLabel: { color: '#777', fontWeight: '700', fontSize: 10, letterSpacing: 0.3, textAlign: 'center' },
+  actionValue: { fontWeight: '800', fontSize: 16 },
 
   // ─── Custom Alert ─────────────────────────────────────
   alertOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    paddingHorizontal: '6%',
+    zIndex: 10000,
   },
   alertBox: {
     backgroundColor: '#161616',
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 340,
-    borderWidth: 1,
-    borderColor: '#272727',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    width: '90%',
+    maxWidth: 360,
+    borderWidth: 1.5,
+    borderColor: '#2A2A2A',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 24,
-    elevation: 20,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.7,
+    shadowRadius: 32,
+    elevation: 24,
   },
   alertIconWrap: {
     width: 64,
@@ -727,33 +755,37 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: '5%',
   },
   alertTitle: {
     color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 22,
+    marginBottom: '3%',
+    lineHeight: 24,
+    letterSpacing: 0.3,
   },
   alertMessage: {
-    color: '#888',
-    fontSize: 14,
+    color: '#999',
+    fontSize: 15,
     textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 20,
+    lineHeight: 23,
+    marginBottom: '6%',
+    fontWeight: '500',
   },
   alertBtns: {
     flexDirection: 'row',
     gap: 10,
     width: '100%',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
   alertBtn: {
     flex: 1,
-    paddingVertical: 13,
-    paddingHorizontal: 12,
+    minWidth: 90,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
     backgroundColor: '#232323',
@@ -779,31 +811,33 @@ const styles = StyleSheet.create({
   // ─── Toast ────────────────────────────────────────────
   toast: {
     position: 'absolute',
-    top: 12,
+    top: 64,
     left: 16,
     right: 16,
     backgroundColor: '#1A1A1A',
-    borderRadius: 14,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    gap: 10,
-    borderWidth: 1,
+    gap: 12,
+    borderWidth: 1.5,
     borderColor: '#2A2A2A',
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
+    zIndex: 9999,
+    elevation: 9999,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
-    zIndex: 999,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
   },
   toastText: {
     color: '#ddd',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
-    lineHeight: 18,
+    lineHeight: 19,
+    letterSpacing: 0.2,
+    maxHeight: 50,
   },
 });

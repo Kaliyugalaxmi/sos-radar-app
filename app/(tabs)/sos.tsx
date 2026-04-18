@@ -1,5 +1,3 @@
-// app/(tabs)/sos.tsx
-// Emergency Contacts — Responsive + Enhanced UI
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {

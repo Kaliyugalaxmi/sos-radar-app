@@ -1,5 +1,3 @@
-// app/(tabs)/radar.tsx
-// Radar Screen — Expanding radius logic
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -36,7 +34,7 @@ import { useAppStore } from '../../store/useAppStore';
 // ─── Radar config ─────────────────────────────────────────────────────────────
 const INITIAL_RADIUS_KM = 2;       // Phase 1: 2km
 const EXPANDED_RADIUS_KM = 10;     // Phase 2: 10km
-const EXPAND_AFTER_MS = 60_000;    // 1 minute baad expand
+const EXPAND_AFTER_MS = 60_000;    // Expand after 1 minute
 
 // ─── Scale helper ─────────────────────────────────────────────────────────────
 function useScale() {
@@ -119,10 +117,10 @@ export default function RadarScreen() {
     return dist <= currentRadiusKm;
   });
 
-  // ─── Radar expand logic — SOS active hone par start ───────────────────────
+  // ─── Radar expand logic — Starts when SOS is active ───────────────────────
   useEffect(() => {
     if (!isSOSActive) {
-      // SOS band hua — reset radar
+      // SOS ended — reset radar
       clearExpandTimers();
       setCurrentRadiusKm(INITIAL_RADIUS_KM);
       setRadarExpanded(false);
@@ -130,15 +128,15 @@ export default function RadarScreen() {
       return;
     }
 
-    // SOS start hua — koi respond kiya ya nahi check karo
+    // SOS started — check if anyone responds
     const hasHelper = helpers.length > 0;
     if (hasHelper) {
-      // Helper aa gaya — expand ki zarurat nahi
+      // Helper arrived — no need to expand
       clearExpandTimers();
       return;
     }
 
-    // Koi nahi aaya — countdown shuru karo
+    // No one arrived — start countdown
     if (!sosStartTimeRef.current) {
       sosStartTimeRef.current = Date.now();
     }
@@ -148,11 +146,11 @@ export default function RadarScreen() {
     return () => clearExpandTimers();
   }, [isSOSActive]);
 
-  // Jab helper aa jaye — expand cancel karo
+  // Cancel expand when helper arrives
   useEffect(() => {
     if (helpers.length > 0 && isSOSActive) {
       clearExpandTimers();
-      console.log('[Radar] Helper aa gaya, expand cancel kiya');
+      console.log('[Radar] Helper arrived, expand cancelled');
     }
   }, [helpers]);
 
@@ -172,16 +170,17 @@ export default function RadarScreen() {
 
     // Expand timer
     expandTimerRef.current = setTimeout(() => {
-      // Check karo helpers aaye ya nahi
+      // Check if helpers have arrived
       const currentHelpers = useAppStore.getState().helpingState;
       const helpersCount = helpers.length;
       if (helpersCount === 0) {
         setCurrentRadiusKm(EXPANDED_RADIUS_KM);
         setRadarExpanded(true);
-        console.log('[Radar] Koi respond nahi kiya — 10km tak expand kiya');
+        console.log('[Radar] No one responded — expanded to 10km');
         Alert.alert(
           '📡 Radar Expanded',
-          'Koi nearby respond nahi kiya.\n10km radius tak friends ko alert bheja ja raha hai.',
+          'Nearby friends did not respond.\nExpanding alert to 10km radius to reach more friends.',
+
           [{ text: 'OK' }]
         );
       }
@@ -363,7 +362,7 @@ export default function RadarScreen() {
               strokeColor={radarExpanded ? 'rgba(255,149,0,0.5)' : 'rgba(255,59,48,0.4)'}
               strokeWidth={2}
             />
-            {/* Inner 2km circle (reference) jab expanded ho */}
+            {/* Inner 2km circle (reference) when expanded */}
             {radarExpanded && (
               <Circle
                 center={myLocation}
@@ -487,7 +486,7 @@ export default function RadarScreen() {
         </View>
       </View>
 
-      {/* ─── Radar Expand Banner (SOS active, koi nahi aaya) ─── */}
+      {/* ─── Radar Expand Banner (SOS active, waiting for response) ─── */}
       {isSOSActive && !radarExpanded && helpers.length === 0 && (
         <View style={[styles.radarBanner, {
           top: s(200), left: s(16), right: s(16),
@@ -496,10 +495,10 @@ export default function RadarScreen() {
           <Ionicons name="radio-outline" size={s(16)} color="#FF3B30" />
           <View style={{ flex: 1, marginLeft: s(8) }}>
             <Text style={[styles.radarBannerTitle, { fontSize: s(13) }]}>
-              📡 2km mein friends ko alert bheja
+              📡 Alerted friends within 2km
             </Text>
             <Text style={[styles.radarBannerSub, { fontSize: s(11) }]}>
-              Koi respond nahi kiya toh {expandCountdown}s mein 10km tak expand hoga
+              If no one responds in {expandCountdown}s, expanding to 10km
             </Text>
           </View>
         </View>
@@ -514,10 +513,10 @@ export default function RadarScreen() {
           <Ionicons name="radio-outline" size={s(16)} color="#FF9500" />
           <View style={{ flex: 1, marginLeft: s(8) }}>
             <Text style={[styles.radarExpandedTitle, { fontSize: s(13) }]}>
-              📡 Radar 10km tak expand ho gaya!
+              📡 Radar expanded to 10km!
             </Text>
             <Text style={[styles.radarExpandedSub, { fontSize: s(11) }]}>
-              Nearby respond nahi kiya — aur friends ko alert bheja
+              Nearby friends didn't respond — expanded alert to more friends
             </Text>
           </View>
         </View>
@@ -584,7 +583,7 @@ export default function RadarScreen() {
               <Text style={[styles.emptyText, { fontSize: s(13) }]}>
                 {(friends ?? []).length === 0
                   ? 'No friends yet — tap "+ Add" to connect'
-                  : `${currentRadiusKm}km mein koi friend nahi`}
+                  : `No friends within ${currentRadiusKm}km`}
               </Text>
             ) : (
               friendsInRadar.map((f, idx) => (
